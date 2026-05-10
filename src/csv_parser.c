@@ -3,7 +3,6 @@
 #include <ctype.h>
 #include <errno.h>
 #include <inttypes.h>
-#include <stdarg.h>
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -25,37 +24,6 @@ typedef struct {
     CsvError *error;
     FieldBuffer field;
 } Parser;
-
-static void clear_error(CsvError *error)
-{
-    if (error == NULL) {
-        return;
-    }
-
-    error->code = CSV_ERROR_NONE;
-    error->line = 0U;
-    error->field = 0U;
-    error->message[0] = '\0';
-}
-
-static bool set_error(CsvError *error, CsvErrorCode code, size_t line, size_t field, const char *format, ...)
-{
-    va_list args;
-
-    if (error == NULL) {
-        return false;
-    }
-
-    error->code = code;
-    error->line = line;
-    error->field = field;
-
-    va_start(args, format);
-    (void)vsnprintf(error->message, sizeof(error->message), format, args);
-    va_end(args);
-
-    return false;
-}
 
 static bool field_buffer_init(FieldBuffer *buffer)
 {
@@ -150,23 +118,23 @@ static bool read_field(Parser *parser, size_t line, size_t field, CsvDelimiter *
             }
 
             if (next == EOF && ferror(parser->stream)) {
-                return set_error(parser->error, CSV_ERROR_IO, line, field, "I/O error while reading CSV");
+                return csv_error_set(parser->error, CSV_ERROR_IO, line, field, "I/O error while reading CSV");
             }
 
-            return set_error(parser->error, CSV_ERROR_MALFORMED, line, field, "bare carriage return at line %zu field %zu", line, field);
+            return csv_error_set(parser->error, CSV_ERROR_MALFORMED, line, field, "bare carriage return at line %zu field %zu", line, field);
         }
 
         if (ch == '"') {
-            return set_error(parser->error, CSV_ERROR_MALFORMED, line, field, "quotes are not supported at line %zu field %zu", line, field);
+            return csv_error_set(parser->error, CSV_ERROR_MALFORMED, line, field, "quotes are not supported at line %zu field %zu", line, field);
         }
 
         if (!field_buffer_append(&parser->field, (char)ch)) {
-            return set_error(parser->error, CSV_ERROR_OUT_OF_MEMORY, line, field, "out of memory while reading field");
+            return csv_error_set(parser->error, CSV_ERROR_OUT_OF_MEMORY, line, field, "out of memory while reading field");
         }
     }
 
     if (ferror(parser->stream)) {
-        return set_error(parser->error, CSV_ERROR_IO, line, field, "I/O error while reading CSV");
+        return csv_error_set(parser->error, CSV_ERROR_IO, line, field, "I/O error while reading CSV");
     }
 
     *delimiter = CSV_DELIM_EOF;
@@ -273,11 +241,11 @@ static bool add_column(Parser *parser, size_t line, size_t field)
     const char *name = parser->field.data;
 
     if (!is_valid_column_name(name)) {
-        return set_error(parser->error, CSV_ERROR_INVALID_HEADER, line, field, "invalid column name at line %zu field %zu", line, field);
+        return csv_error_set(parser->error, CSV_ERROR_INVALID_HEADER, line, field, "invalid column name at line %zu field %zu", line, field);
     }
 
     if (!table_add_column(parser->table, name, field)) {
-        return set_error(parser->error, CSV_ERROR_OUT_OF_MEMORY, line, field, "out of memory while adding column");
+        return csv_error_set(parser->error, CSV_ERROR_OUT_OF_MEMORY, line, field, "out of memory while adding column");
     }
 
     return true;
@@ -294,15 +262,15 @@ static bool parse_header(Parser *parser, CsvDelimiter *header_delimiter)
     }
 
     if (delimiter == CSV_DELIM_EOF && parser->field.length == 0U) {
-        return set_error(parser->error, CSV_ERROR_EMPTY_FILE, line, field, "empty file");
+        return csv_error_set(parser->error, CSV_ERROR_EMPTY_FILE, line, field, "empty file");
     }
 
     if (parser->field.length != 0U) {
-        return set_error(parser->error, CSV_ERROR_INVALID_HEADER, line, field, "first header cell must be empty");
+        return csv_error_set(parser->error, CSV_ERROR_INVALID_HEADER, line, field, "first header cell must be empty");
     }
 
     if (delimiter != CSV_DELIM_COMMA) {
-        return set_error(parser->error, CSV_ERROR_INVALID_HEADER, line, field, "header must contain at least one column");
+        return csv_error_set(parser->error, CSV_ERROR_INVALID_HEADER, line, field, "header must contain at least one column");
     }
 
     field = 2U;
@@ -328,13 +296,13 @@ static bool parse_row_number(Parser *parser, size_t line, size_t field, int64_t 
 
     if (!parse_unsigned_int64_strict(parser->field.data, row_number, &overflow)) {
         if (overflow) {
-            return set_error(parser->error, CSV_ERROR_INTEGER_OVERFLOW, line, field, "row number overflow at line %zu field %zu", line, field);
+            return csv_error_set(parser->error, CSV_ERROR_INTEGER_OVERFLOW, line, field, "row number overflow at line %zu field %zu", line, field);
         }
-        return set_error(parser->error, CSV_ERROR_INVALID_ROW_NUMBER, line, field, "invalid row number at line %zu field %zu", line, field);
+        return csv_error_set(parser->error, CSV_ERROR_INVALID_ROW_NUMBER, line, field, "invalid row number at line %zu field %zu", line, field);
     }
 
     if (*row_number == 0) {
-        return set_error(parser->error, CSV_ERROR_INVALID_ROW_NUMBER, line, field, "row number must be positive at line %zu", line);
+        return csv_error_set(parser->error, CSV_ERROR_INVALID_ROW_NUMBER, line, field, "row number must be positive at line %zu", line);
     }
 
     return true;
@@ -346,7 +314,7 @@ static bool add_cell(Parser *parser, size_t line, size_t field)
     bool overflow = false;
 
     if (parser->field.data[0] == '\0') {
-        return set_error(parser->error, CSV_ERROR_INVALID_CELL, line, field, "empty cell at line %zu field %zu", line, field);
+        return csv_error_set(parser->error, CSV_ERROR_INVALID_CELL, line, field, "empty cell at line %zu field %zu", line, field);
     }
 
     if (parser->field.data[0] == '=') {
@@ -358,20 +326,20 @@ static bool add_cell(Parser *parser, size_t line, size_t field)
 
         if (!table_add_formula_cell(parser->table, &formula, line, field)) {
             formula_free(&formula);
-            return set_error(parser->error, CSV_ERROR_OUT_OF_MEMORY, line, field, "out of memory while adding formula");
+            return csv_error_set(parser->error, CSV_ERROR_OUT_OF_MEMORY, line, field, "out of memory while adding formula");
         }
         return true;
     }
 
     if (!parse_signed_int64_strict(parser->field.data, &value, &overflow)) {
         if (overflow) {
-            return set_error(parser->error, CSV_ERROR_INTEGER_OVERFLOW, line, field, "integer overflow at line %zu field %zu", line, field);
+            return csv_error_set(parser->error, CSV_ERROR_INTEGER_OVERFLOW, line, field, "integer overflow at line %zu field %zu", line, field);
         }
-        return set_error(parser->error, CSV_ERROR_INVALID_CELL, line, field, "invalid integer cell at line %zu field %zu", line, field);
+        return csv_error_set(parser->error, CSV_ERROR_INVALID_CELL, line, field, "invalid integer cell at line %zu field %zu", line, field);
     }
 
     if (!table_add_number_cell(parser->table, value, line, field)) {
-        return set_error(parser->error, CSV_ERROR_OUT_OF_MEMORY, line, field, "out of memory while adding cell");
+        return csv_error_set(parser->error, CSV_ERROR_OUT_OF_MEMORY, line, field, "out of memory while adding cell");
     }
 
     return true;
@@ -394,11 +362,11 @@ static bool parse_cells(Parser *parser, size_t line, CsvDelimiter *row_delimiter
         }
 
         if (column + 1U < parser->table->column_count && delimiter != CSV_DELIM_COMMA) {
-            return set_error(parser->error, CSV_ERROR_MALFORMED, line, field, "too few fields at line %zu", line);
+            return csv_error_set(parser->error, CSV_ERROR_MALFORMED, line, field, "too few fields at line %zu", line);
         }
 
         if (column + 1U == parser->table->column_count && delimiter == CSV_DELIM_COMMA) {
-            return set_error(parser->error, CSV_ERROR_MALFORMED, line, field + 1U, "too many fields at line %zu", line);
+            return csv_error_set(parser->error, CSV_ERROR_MALFORMED, line, field + 1U, "too many fields at line %zu", line);
         }
 
         column++;
@@ -424,13 +392,13 @@ static bool parse_data_rows(Parser *parser, size_t start_line)
 
         if (delimiter == CSV_DELIM_EOF && parser->field.length == 0U) {
             if (!has_data_row) {
-                return set_error(parser->error, CSV_ERROR_INVALID_HEADER, line, 1U, "table must contain at least one data row");
+                return csv_error_set(parser->error, CSV_ERROR_INVALID_HEADER, line, 1U, "table must contain at least one data row");
             }
             return true;
         }
 
         if (delimiter == CSV_DELIM_LINE && parser->field.length == 0U) {
-            return set_error(parser->error, CSV_ERROR_MALFORMED, line, 1U, "empty line at line %zu", line);
+            return csv_error_set(parser->error, CSV_ERROR_MALFORMED, line, 1U, "empty line at line %zu", line);
         }
 
         if (!parse_row_number(parser, line, 1U, &row_number)) {
@@ -438,11 +406,11 @@ static bool parse_data_rows(Parser *parser, size_t start_line)
         }
 
         if (delimiter != CSV_DELIM_COMMA) {
-            return set_error(parser->error, CSV_ERROR_MALFORMED, line, 2U, "too few fields at line %zu", line);
+            return csv_error_set(parser->error, CSV_ERROR_MALFORMED, line, 2U, "too few fields at line %zu", line);
         }
 
         if (!table_add_row(parser->table, row_number, line, NULL)) {
-            return set_error(parser->error, CSV_ERROR_OUT_OF_MEMORY, line, 1U, "out of memory while adding row");
+            return csv_error_set(parser->error, CSV_ERROR_OUT_OF_MEMORY, line, 1U, "out of memory while adding row");
         }
 
         if (!parse_cells(parser, line, &delimiter)) {
@@ -467,7 +435,7 @@ bool csv_parse_stream(FILE *stream, Table *table, CsvError *error)
     CsvDelimiter header_delimiter = CSV_DELIM_EOF;
     bool ok = false;
 
-    clear_error(error);
+    csv_error_clear(error);
     table_init(table);
 
     parser.stream = stream;
@@ -475,13 +443,13 @@ bool csv_parse_stream(FILE *stream, Table *table, CsvError *error)
     parser.error = error;
 
     if (!field_buffer_init(&parser.field)) {
-        return set_error(error, CSV_ERROR_OUT_OF_MEMORY, 0U, 0U, "out of memory while initializing parser");
+        return csv_error_set(error, CSV_ERROR_OUT_OF_MEMORY, 0U, 0U, "out of memory while initializing parser");
     }
 
     ok = parse_header(&parser, &header_delimiter);
     if (ok) {
         if (header_delimiter == CSV_DELIM_EOF) {
-            ok = set_error(error, CSV_ERROR_INVALID_HEADER, 1U, parser.table->column_count + 1U, "table must contain at least one data row");
+            ok = csv_error_set(error, CSV_ERROR_INVALID_HEADER, 1U, parser.table->column_count + 1U, "table must contain at least one data row");
         } else {
             ok = parse_data_rows(&parser, 2U);
         }
@@ -489,7 +457,7 @@ bool csv_parse_stream(FILE *stream, Table *table, CsvError *error)
 
     if (ok && !table_build_lookups(table, error)) {
         if (error == NULL || error->code == CSV_ERROR_NONE) {
-            ok = set_error(error, CSV_ERROR_OUT_OF_MEMORY, 0U, 0U, "out of memory while building lookup tables");
+            ok = csv_error_set(error, CSV_ERROR_OUT_OF_MEMORY, 0U, 0U, "out of memory while building lookup tables");
         } else {
             ok = false;
         }
@@ -511,14 +479,14 @@ bool csv_parse_file(const char *path, Table *table, CsvError *error)
 
     if (stream == NULL) {
         table_init(table);
-        return set_error(error, CSV_ERROR_IO, 0U, 0U, "cannot open file '%s'", path);
+        return csv_error_set(error, CSV_ERROR_IO, 0U, 0U, "cannot open file '%s'", path);
     }
 
     ok = csv_parse_stream(stream, table, error);
 
     if (fclose(stream) != 0 && ok) {
         table_free(table);
-        ok = set_error(error, CSV_ERROR_IO, 0U, 0U, "cannot close file '%s'", path);
+        ok = csv_error_set(error, CSV_ERROR_IO, 0U, 0U, "cannot close file '%s'", path);
     }
 
     return ok;

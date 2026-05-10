@@ -1,9 +1,7 @@
 #include "formula.h"
 
 #include <ctype.h>
-#include <stdarg.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -17,30 +15,6 @@ typedef struct {
 static void formula_init(ParsedFormula *formula)
 {
     memset(formula, 0, sizeof(*formula));
-}
-
-static bool set_formula_error(
-    FormulaParser *parser,
-    CsvErrorCode code,
-    const char *format,
-    ...
-)
-{
-    va_list args;
-
-    if (parser->error == NULL) {
-        return false;
-    }
-
-    parser->error->code = code;
-    parser->error->line = parser->source_line;
-    parser->error->field = parser->source_field;
-
-    va_start(args, format);
-    (void)vsnprintf(parser->error->message, sizeof(parser->error->message), format, args);
-    va_end(args);
-
-    return false;
 }
 
 static bool is_column_char(int ch)
@@ -82,9 +56,11 @@ static bool parse_number(FormulaParser *parser, FormulaArg *arg)
     }
 
     if (!is_digit_char(*current)) {
-        return set_formula_error(
-            parser,
+        return csv_error_set(
+            parser->error,
             CSV_ERROR_INVALID_FORMULA,
+            parser->source_line,
+            parser->source_field,
             "invalid formula at line %zu field %zu",
             parser->source_line,
             parser->source_field
@@ -95,9 +71,11 @@ static bool parse_number(FormulaParser *parser, FormulaArg *arg)
         uint64_t digit = (uint64_t)(*current - '0');
 
         if (value > ((limit - digit) / 10U)) {
-            return set_formula_error(
-                parser,
+            return csv_error_set(
+                parser->error,
                 CSV_ERROR_INTEGER_OVERFLOW,
+                parser->source_line,
+                parser->source_field,
                 "integer overflow in formula at line %zu field %zu",
                 parser->source_line,
                 parser->source_field
@@ -134,9 +112,11 @@ static bool parse_row_number(FormulaParser *parser, int64_t *row_number)
 
         has_digit = true;
         if (value > ((((uint64_t)INT64_MAX) - digit) / 10U)) {
-            return set_formula_error(
-                parser,
+            return csv_error_set(
+                parser->error,
                 CSV_ERROR_INTEGER_OVERFLOW,
+                parser->source_line,
+                parser->source_field,
                 "integer overflow in formula at line %zu field %zu",
                 parser->source_line,
                 parser->source_field
@@ -148,9 +128,11 @@ static bool parse_row_number(FormulaParser *parser, int64_t *row_number)
     }
 
     if (!has_digit || value == 0U) {
-        return set_formula_error(
-            parser,
+        return csv_error_set(
+            parser->error,
             CSV_ERROR_INVALID_FORMULA,
+            parser->source_line,
+            parser->source_field,
             "invalid cell reference syntax at line %zu field %zu",
             parser->source_line,
             parser->source_field
@@ -176,9 +158,11 @@ static bool parse_reference(FormulaParser *parser, FormulaArg *arg)
 
     name_length = (size_t)(current - name_start);
     if (!is_digit_char(*current)) {
-        return set_formula_error(
-            parser,
+        return csv_error_set(
+            parser->error,
             CSV_ERROR_INVALID_FORMULA,
+            parser->source_line,
+            parser->source_field,
             "invalid cell reference syntax at line %zu field %zu",
             parser->source_line,
             parser->source_field
@@ -192,9 +176,11 @@ static bool parse_reference(FormulaParser *parser, FormulaArg *arg)
 
     column_name = copy_range(name_start, name_length);
     if (column_name == NULL) {
-        return set_formula_error(
-            parser,
+        return csv_error_set(
+            parser->error,
             CSV_ERROR_OUT_OF_MEMORY,
+            parser->source_line,
+            parser->source_field,
             "out of memory while parsing formula at line %zu field %zu",
             parser->source_line,
             parser->source_field
@@ -220,9 +206,11 @@ static bool parse_arg(FormulaParser *parser, FormulaArg *arg)
         return parse_reference(parser, arg);
     }
 
-    return set_formula_error(
-        parser,
+    return csv_error_set(
+        parser->error,
         CSV_ERROR_INVALID_FORMULA,
+        parser->source_line,
+        parser->source_field,
         "invalid formula at line %zu field %zu",
         parser->source_line,
         parser->source_field
@@ -249,9 +237,11 @@ static bool parse_operator(FormulaParser *parser, FormulaOp *op)
             parser->cursor++;
             return true;
         default:
-            return set_formula_error(
-                parser,
+            return csv_error_set(
+                parser->error,
                 CSV_ERROR_INVALID_FORMULA,
+                parser->source_line,
+                parser->source_field,
                 "invalid formula at line %zu field %zu",
                 parser->source_line,
                 parser->source_field
@@ -288,12 +278,7 @@ bool formula_parse_text(
 
     formula_init(formula);
 
-    if (error != NULL) {
-        error->code = CSV_ERROR_NONE;
-        error->line = 0U;
-        error->field = 0U;
-        error->message[0] = '\0';
-    }
+    csv_error_clear(error);
 
     parser.cursor = text;
     parser.error = error;
@@ -301,9 +286,11 @@ bool formula_parse_text(
     parser.source_field = source_field;
 
     if (text == NULL || *parser.cursor != '=') {
-        return set_formula_error(
-            &parser,
+        return csv_error_set(
+            parser.error,
             CSV_ERROR_INVALID_FORMULA,
+            parser.source_line,
+            parser.source_field,
             "invalid formula at line %zu field %zu",
             source_line,
             source_field
@@ -317,9 +304,11 @@ bool formula_parse_text(
         !parse_arg(&parser, &formula->right) ||
         *parser.cursor != '\0') {
         if (*parser.cursor != '\0' && error != NULL && error->code == CSV_ERROR_NONE) {
-            (void)set_formula_error(
-                &parser,
+            (void)csv_error_set(
+                parser.error,
                 CSV_ERROR_INVALID_FORMULA,
+                parser.source_line,
+                parser.source_field,
                 "invalid formula at line %zu field %zu",
                 source_line,
                 source_field
@@ -327,9 +316,11 @@ bool formula_parse_text(
         }
         formula_free(formula);
         if (error != NULL && error->code == CSV_ERROR_NONE) {
-            (void)set_formula_error(
-                &parser,
+            (void)csv_error_set(
+                parser.error,
                 CSV_ERROR_INVALID_FORMULA,
+                parser.source_line,
+                parser.source_field,
                 "invalid formula at line %zu field %zu",
                 source_line,
                 source_field

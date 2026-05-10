@@ -8,6 +8,7 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 add_library(csv_core
     src/csv_parser.c
+    src/error.c
     src/evaluator.c
     src/formula.c
     src/table.c

@@ -1,6 +1,7 @@
 #ifndef CSVREADER_ERROR_H
 #define CSVREADER_ERROR_H
 
+#include <stdbool.h>
 #include <stddef.h>
 
 typedef enum {
@@ -27,5 +28,8 @@ typedef struct {
     size_t field;         /* Номер поля CSV в этой строке. */
     char message[256];    /* Готовый текст для вывода после префикса error:. */
 } CsvError;
+
+void csv_error_clear(CsvError *error);
+bool csv_error_set(CsvError *error, CsvErrorCode code, size_t line, size_t field, const char *format, ...);
 
 #endif

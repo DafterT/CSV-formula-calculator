@@ -1,21 +1,7 @@
 #include "table.h"
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-static bool set_table_error(CsvError *error, CsvErrorCode code, size_t line, size_t field, const char *message)
-{
-    if (error == NULL) {
-        return false;
-    }
-
-    error->code = code;
-    error->line = line;
-    error->field = field;
-    (void)snprintf(error->message, sizeof(error->message), "%s", message);
-    return false;
-}
 
 static int compare_row_lookup(const void *left, const void *right)
 {
@@ -247,10 +233,15 @@ static bool validate_unique_rows(const Table *table, CsvError *error)
 
         if (previous->number == current->number) {
             const Row *row = &table->rows[current->row_index];
-            char message[256];
 
-            (void)snprintf(message, sizeof(message), "duplicate row number %lld", (long long)current->number);
-            return set_table_error(error, CSV_ERROR_DUPLICATE_ROW, row->source_line, 1U, message);
+            return csv_error_set(
+                error,
+                CSV_ERROR_DUPLICATE_ROW,
+                row->source_line,
+                1U,
+                "duplicate row number %lld",
+                (long long)current->number
+            );
         }
 
         index++;
@@ -269,10 +260,15 @@ static bool validate_unique_columns(const Table *table, CsvError *error)
 
         if (strcmp(previous->name, current->name) == 0) {
             const Column *column = &table->columns[current->column_index];
-            char message[256];
 
-            (void)snprintf(message, sizeof(message), "duplicate column '%s'", current->name);
-            return set_table_error(error, CSV_ERROR_DUPLICATE_COLUMN, 1U, column->source_field, message);
+            return csv_error_set(
+                error,
+                CSV_ERROR_DUPLICATE_COLUMN,
+                1U,
+                column->source_field,
+                "duplicate column '%s'",
+                current->name
+            );
         }
 
         index++;
