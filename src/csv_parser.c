@@ -387,7 +387,14 @@ static bool add_cell(Parser *parser, size_t line, size_t field)
     }
 
     if (parser->field.data[0] == '=') {
-        if (!table_add_formula_cell(parser->table, parser->field.data, line, field)) {
+        ParsedFormula formula;
+
+        if (!formula_parse_text(parser->field.data, &formula, parser->error, line, field)) {
+            return false;
+        }
+
+        if (!table_add_formula_cell(parser->table, &formula, line, field)) {
+            formula_free(&formula);
             return set_error(parser->error, CSV_ERROR_OUT_OF_MEMORY, line, field, "out of memory while adding formula");
         }
         return true;

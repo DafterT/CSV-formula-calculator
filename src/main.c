@@ -3,6 +3,39 @@
 #include <inttypes.h>
 #include <stdio.h>
 
+static char formula_op_char(FormulaOp op)
+{
+    switch (op) {
+        case FORMULA_OP_ADD:
+            return '+';
+        case FORMULA_OP_SUB:
+            return '-';
+        case FORMULA_OP_MUL:
+            return '*';
+        case FORMULA_OP_DIV:
+            return '/';
+        default:
+            return '?';
+    }
+}
+
+static void print_formula_arg(const FormulaArg *arg)
+{
+    if (arg->kind == FORMULA_ARG_REFERENCE) {
+        printf("%s%" PRId64, arg->as.ref.column_name, arg->as.ref.row_number);
+    } else {
+        printf("%" PRId64, arg->as.number);
+    }
+}
+
+static void print_formula(const ParsedFormula *formula)
+{
+    putchar('=');
+    print_formula_arg(&formula->left);
+    putchar(formula_op_char(formula->op));
+    print_formula_arg(&formula->right);
+}
+
 static void print_table(const Table *table)
 {
     size_t column = 0U;
@@ -27,7 +60,7 @@ static void print_table(const Table *table)
 
             putchar(',');
             if (cell->kind == CELL_FORMULA) {
-                fputs(cell->formula, stdout);
+                print_formula(&cell->formula);
             } else {
                 printf("%" PRId64, cell->value);
             }

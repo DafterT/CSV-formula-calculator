@@ -1,6 +1,8 @@
 #ifndef CSVREADER_TABLE_H
 #define CSVREADER_TABLE_H
 
+#include "formula.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -20,7 +22,7 @@ typedef struct {
     CellKind kind;       /* Тип ячейки: число или формула. */
     EvalState state;     /* Состояние для будущего вычисления зависимостей. */
     int64_t value;       /* Число или будущий результат формулы. */
-    char *formula;       /* Собственная копия raw-формулы, включая '='. */
+    ParsedFormula formula; /* Разобранная формула для CELL_FORMULA. */
     size_t source_line;  /* Строка исходного CSV для диагностики. */
     size_t source_field; /* Поле исходного CSV для диагностики. */
 } Cell;
@@ -69,7 +71,7 @@ void table_free(Table *table);
 bool table_add_column(Table *table, const char *name, size_t source_field);
 bool table_add_row(Table *table, int64_t number, size_t source_line, size_t *row_index);
 bool table_add_number_cell(Table *table, int64_t value, size_t source_line, size_t source_field);
-bool table_add_formula_cell(Table *table, const char *formula, size_t source_line, size_t source_field);
+bool table_add_formula_cell(Table *table, ParsedFormula *formula, size_t source_line, size_t source_field);
 bool table_build_lookups(Table *table);
 
 size_t table_cell_index(const Table *table, size_t row_index, size_t column_index);

@@ -82,7 +82,9 @@ void table_free(Table *table)
 
     index = 0U;
     while (index < table->cell_count) {
-        free(table->cells[index].formula);
+        if (table->cells[index].kind == CELL_FORMULA) {
+            formula_free(&table->cells[index].formula);
+        }
         index++;
     }
 
@@ -163,23 +165,18 @@ bool table_add_number_cell(Table *table, int64_t value, size_t source_line, size
 
     table->cells = cells;
     table->cells[table->cell_count].kind = CELL_NUMBER;
-    table->cells[table->cell_count].state = EVAL_NOT_VISITED;
+    table->cells[table->cell_count].state = EVAL_DONE;
     table->cells[table->cell_count].value = value;
-    table->cells[table->cell_count].formula = NULL;
+    memset(&table->cells[table->cell_count].formula, 0, sizeof(table->cells[table->cell_count].formula));
     table->cells[table->cell_count].source_line = source_line;
     table->cells[table->cell_count].source_field = source_field;
     table->cell_count++;
     return true;
 }
 
-bool table_add_formula_cell(Table *table, const char *formula, size_t source_line, size_t source_field)
+bool table_add_formula_cell(Table *table, ParsedFormula *formula, size_t source_line, size_t source_field)
 {
     Cell *cells = NULL;
-    char *formula_copy = copy_string(formula);
-
-    if (formula_copy == NULL) {
-        return false;
-    }
 
     cells = grow_array(
         table->cells,
@@ -188,7 +185,6 @@ bool table_add_formula_cell(Table *table, const char *formula, size_t source_lin
         table->cell_count + 1U
     );
     if (cells == NULL) {
-        free(formula_copy);
         return false;
     }
 
@@ -196,7 +192,7 @@ bool table_add_formula_cell(Table *table, const char *formula, size_t source_lin
     table->cells[table->cell_count].kind = CELL_FORMULA;
     table->cells[table->cell_count].state = EVAL_NOT_VISITED;
     table->cells[table->cell_count].value = 0;
-    table->cells[table->cell_count].formula = formula_copy;
+    table->cells[table->cell_count].formula = *formula;
     table->cells[table->cell_count].source_line = source_line;
     table->cells[table->cell_count].source_field = source_field;
     table->cell_count++;

@@ -56,6 +56,24 @@ static bool expect_error(const char *csv, CsvErrorCode code)
     return true;
 }
 
+static bool expect_number_arg(const FormulaArg *arg, int64_t value)
+{
+    EXPECT_EQ_INT64(FORMULA_ARG_NUMBER, arg->kind);
+    EXPECT_EQ_INT64(value, arg->as.number);
+    return true;
+}
+
+static bool expect_reference_arg(const FormulaArg *arg, const char *column_name, int64_t row_number)
+{
+    EXPECT_EQ_INT64(FORMULA_ARG_REFERENCE, arg->kind);
+    EXPECT_STREQ(column_name, arg->as.ref.column_name);
+    EXPECT_EQ_INT64(row_number, arg->as.ref.row_number);
+    EXPECT_FALSE(arg->as.ref.resolved);
+    EXPECT_EQ_SIZE(SIZE_MAX, arg->as.ref.row_index);
+    EXPECT_EQ_SIZE(SIZE_MAX, arg->as.ref.column_index);
+    return true;
+}
+
 static bool valid_basic_shape(void)
 {
     const char *csv = ",A,B,Cell\n1,1,0,1\n2,2,=A1+Cell30,0\n30,0,=B1+A1,5\n";
@@ -77,7 +95,9 @@ static bool valid_basic_shape(void)
     cell = table_cell_at_const(&table, 1U, 1U);
     EXPECT_TRUE(cell != NULL);
     EXPECT_EQ_INT64(CELL_FORMULA, cell->kind);
-    EXPECT_STREQ("=A1+Cell30", cell->formula);
+    EXPECT_TRUE(expect_reference_arg(&cell->formula.left, "A", 1));
+    EXPECT_EQ_INT64(FORMULA_OP_ADD, cell->formula.op);
+    EXPECT_TRUE(expect_reference_arg(&cell->formula.right, "Cell", 30));
     EXPECT_TRUE(table.row_lookup != NULL);
     EXPECT_TRUE(table.column_lookup != NULL);
 
@@ -145,9 +165,9 @@ static bool valid_negative_cell(void)
     return true;
 }
 
-static bool valid_formula_raw(void)
+static bool valid_formula_parsed(void)
 {
-    const char *csv = ",A,B\n1,=A1+Cell30,=\n";
+    const char *csv = ",A,B,C\n1,=A1+Cell30,=C1+1,=-1+2\n";
     Table table;
     CsvError error;
     const Cell *cell = NULL;
@@ -155,10 +175,58 @@ static bool valid_formula_raw(void)
     EXPECT_TRUE(parse_text(csv, &table, &error));
     cell = table_cell_at_const(&table, 0U, 0U);
     EXPECT_TRUE(cell != NULL);
-    EXPECT_STREQ("=A1+Cell30", cell->formula);
+    EXPECT_EQ_INT64(CELL_FORMULA, cell->kind);
+    EXPECT_TRUE(expect_reference_arg(&cell->formula.left, "A", 1));
+    EXPECT_EQ_INT64(FORMULA_OP_ADD, cell->formula.op);
+    EXPECT_TRUE(expect_reference_arg(&cell->formula.right, "Cell", 30));
+
     cell = table_cell_at_const(&table, 0U, 1U);
     EXPECT_TRUE(cell != NULL);
-    EXPECT_STREQ("=", cell->formula);
+    EXPECT_TRUE(expect_reference_arg(&cell->formula.left, "C", 1));
+    EXPECT_EQ_INT64(FORMULA_OP_ADD, cell->formula.op);
+    EXPECT_TRUE(expect_number_arg(&cell->formula.right, 1));
+
+    cell = table_cell_at_const(&table, 0U, 2U);
+    EXPECT_TRUE(cell != NULL);
+    EXPECT_TRUE(expect_number_arg(&cell->formula.left, -1));
+    EXPECT_EQ_INT64(FORMULA_OP_ADD, cell->formula.op);
+    EXPECT_TRUE(expect_number_arg(&cell->formula.right, 2));
+
+    table_free(&table);
+    return true;
+}
+
+static bool valid_unknown_reference_syntax(void)
+{
+    const char *csv = ",A\n1,=C1+1\n";
+    Table table;
+    CsvError error;
+    const Cell *cell = NULL;
+
+    EXPECT_TRUE(parse_text(csv, &table, &error));
+    cell = table_cell_at_const(&table, 0U, 0U);
+    EXPECT_TRUE(cell != NULL);
+    EXPECT_TRUE(expect_reference_arg(&cell->formula.left, "C", 1));
+    EXPECT_EQ_INT64(FORMULA_OP_ADD, cell->formula.op);
+    EXPECT_TRUE(expect_number_arg(&cell->formula.right, 1));
+
+    table_free(&table);
+    return true;
+}
+
+static bool valid_formula_negative_number(void)
+{
+    const char *csv = ",A\n1,=-1+2\n";
+    Table table;
+    CsvError error;
+    const Cell *cell = NULL;
+
+    EXPECT_TRUE(parse_text(csv, &table, &error));
+    cell = table_cell_at_const(&table, 0U, 0U);
+    EXPECT_TRUE(cell != NULL);
+    EXPECT_TRUE(expect_number_arg(&cell->formula.left, -1));
+    EXPECT_EQ_INT64(FORMULA_OP_ADD, cell->formula.op);
+    EXPECT_TRUE(expect_number_arg(&cell->formula.right, 2));
 
     table_free(&table);
     return true;
@@ -188,6 +256,8 @@ static bool invalid_integer_overflow(void) { return expect_error(",A\n1,99999999
 static bool invalid_quote(void) { return expect_error(",A\n1,\"1\"\n", CSV_ERROR_MALFORMED); }
 static bool invalid_bare_cr(void) { return expect_error(",A\r1,1\n", CSV_ERROR_MALFORMED); }
 static bool invalid_empty_line(void) { return expect_error(",A\n\n1,1\n", CSV_ERROR_MALFORMED); }
+static bool invalid_formula_empty(void) { return expect_error(",A\n1,=\n", CSV_ERROR_INVALID_FORMULA); }
+static bool invalid_formula_spaces(void) { return expect_error(",A\n1,=A1 +1\n", CSV_ERROR_INVALID_FORMULA); }
 
 int main(void)
 {
@@ -197,7 +267,9 @@ int main(void)
         {"valid_crlf", valid_crlf},
         {"valid_no_final_newline", valid_no_final_newline},
         {"valid_negative_cell", valid_negative_cell},
-        {"valid_formula_raw", valid_formula_raw},
+        {"valid_formula_parsed", valid_formula_parsed},
+        {"valid_unknown_reference_syntax", valid_unknown_reference_syntax},
+        {"valid_formula_negative_number", valid_formula_negative_number},
         {"invalid_empty_file", invalid_empty_file},
         {"invalid_header_only", invalid_header_only},
         {"invalid_header_first_cell_not_empty", invalid_header_first_cell_not_empty},
@@ -221,7 +293,9 @@ int main(void)
         {"invalid_integer_overflow", invalid_integer_overflow},
         {"invalid_quote", invalid_quote},
         {"invalid_bare_cr", invalid_bare_cr},
-        {"invalid_empty_line", invalid_empty_line}
+        {"invalid_empty_line", invalid_empty_line},
+        {"invalid_formula_empty", invalid_formula_empty},
+        {"invalid_formula_spaces", invalid_formula_spaces}
     };
     size_t count = sizeof(tests) / sizeof(tests[0]);
     size_t index = 0U;
