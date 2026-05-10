@@ -13,6 +13,12 @@ typedef struct {
     size_t capacity;
 } EvalStack;
 
+typedef enum {
+    DEPENDENCY_DONE,
+    DEPENDENCY_PUSHED,
+    DEPENDENCY_ERROR
+} DependencyResult;
+
 static bool checked_add_i64(int64_t left, int64_t right, int64_t *result)
 {
     if ((right > 0 && left > INT64_MAX - right) ||
@@ -98,6 +104,10 @@ static bool eval_stack_push(EvalStack *stack, Cell *cell, CsvError *error)
                 return csv_error_set(error, CSV_ERROR_OUT_OF_MEMORY, 0U, 0U, "out of memory while evaluating formulas");
             }
             new_capacity *= 2U;
+        }
+
+        if (new_capacity > (SIZE_MAX / sizeof(stack->items[0]))) {
+            return csv_error_set(error, CSV_ERROR_OUT_OF_MEMORY, 0U, 0U, "out of memory while evaluating formulas");
         }
 
         grown = realloc(stack->items, new_capacity * sizeof(stack->items[0]));
@@ -242,6 +252,39 @@ static bool apply_operator(const Cell *cell, int64_t left, int64_t right, int64_
     return true;
 }
 
+static DependencyResult ensure_dependency_evaluated(Table *table, const FormulaRef *ref, EvalStack *stack, CsvError *error)
+{
+    Cell *target = NULL;
+
+    target = cell_for_ref(table, ref);
+    if (target == NULL) {
+        csv_error_set(error, CSV_ERROR_INVALID_REFERENCE, 0U, 0U, "invalid resolved reference");
+        return DEPENDENCY_ERROR;
+    }
+
+    if (target->state == EVAL_VISITING) {
+        csv_error_set(
+            error,
+            CSV_ERROR_CYCLIC_DEPENDENCY,
+            target->source_line,
+            target->source_field,
+            "cyclic dependency at line %zu field %zu",
+            target->source_line,
+            target->source_field
+        );
+        return DEPENDENCY_ERROR;
+    }
+
+    if (target->state == EVAL_NOT_VISITED) {
+        if (!eval_stack_push(stack, target, error)) {
+            return DEPENDENCY_ERROR;
+        }
+        return DEPENDENCY_PUSHED;
+    }
+
+    return DEPENDENCY_DONE;
+}
+
 static bool evaluate_cell(Table *table, Cell *root, int64_t *value, CsvError *error)
 {
     EvalStack stack = {0};
@@ -257,7 +300,7 @@ static bool evaluate_cell(Table *table, Cell *root, int64_t *value, CsvError *er
 
     while (stack.count > 0U) {
         Cell *cell = stack.items[stack.count - 1U].cell;
-        Cell *target = NULL;
+        DependencyResult dependency = DEPENDENCY_DONE;
 
         if (cell->state == EVAL_DONE) {
             stack.count--;
@@ -269,59 +312,23 @@ static bool evaluate_cell(Table *table, Cell *root, int64_t *value, CsvError *er
         }
 
         if (cell->formula.left.kind == FORMULA_ARG_REFERENCE) {
-            target = cell_for_ref(table, &cell->formula.left.as.ref);
-            if (target == NULL) {
+            dependency = ensure_dependency_evaluated(table, &cell->formula.left.as.ref, &stack, error);
+            if (dependency == DEPENDENCY_ERROR) {
                 eval_stack_free(&stack);
-                return csv_error_set(error, CSV_ERROR_INVALID_REFERENCE, 0U, 0U, "invalid resolved reference");
+                return false;
             }
-
-            if (target->state == EVAL_VISITING) {
-                eval_stack_free(&stack);
-                return csv_error_set(
-                    error,
-                    CSV_ERROR_CYCLIC_DEPENDENCY,
-                    target->source_line,
-                    target->source_field,
-                    "cyclic dependency at line %zu field %zu",
-                    target->source_line,
-                    target->source_field
-                );
-            }
-
-            if (target->state == EVAL_NOT_VISITED) {
-                if (!eval_stack_push(&stack, target, error)) {
-                    eval_stack_free(&stack);
-                    return false;
-                }
+            if (dependency == DEPENDENCY_PUSHED) {
                 continue;
             }
         }
 
         if (cell->formula.right.kind == FORMULA_ARG_REFERENCE) {
-            target = cell_for_ref(table, &cell->formula.right.as.ref);
-            if (target == NULL) {
+            dependency = ensure_dependency_evaluated(table, &cell->formula.right.as.ref, &stack, error);
+            if (dependency == DEPENDENCY_ERROR) {
                 eval_stack_free(&stack);
-                return csv_error_set(error, CSV_ERROR_INVALID_REFERENCE, 0U, 0U, "invalid resolved reference");
+                return false;
             }
-
-            if (target->state == EVAL_VISITING) {
-                eval_stack_free(&stack);
-                return csv_error_set(
-                    error,
-                    CSV_ERROR_CYCLIC_DEPENDENCY,
-                    target->source_line,
-                    target->source_field,
-                    "cyclic dependency at line %zu field %zu",
-                    target->source_line,
-                    target->source_field
-                );
-            }
-
-            if (target->state == EVAL_NOT_VISITED) {
-                if (!eval_stack_push(&stack, target, error)) {
-                    eval_stack_free(&stack);
-                    return false;
-                }
+            if (dependency == DEPENDENCY_PUSHED) {
                 continue;
             }
         }

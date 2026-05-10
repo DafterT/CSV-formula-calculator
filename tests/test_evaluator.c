@@ -275,6 +275,7 @@ static bool invalid_unknown_row(void) { return expect_error(",A\n1,=A2+1\n", CSV
 static bool invalid_division_by_zero_literal(void) { return expect_error(",A\n1,=1/0\n", CSV_ERROR_DIVISION_BY_ZERO); }
 static bool invalid_division_by_zero_reference(void) { return expect_error(",A,B\n1,0,=10/A1\n", CSV_ERROR_DIVISION_BY_ZERO); }
 static bool invalid_self_cycle(void) { return expect_error(",A\n1,=A1+1\n", CSV_ERROR_CYCLIC_DEPENDENCY); }
+static bool invalid_right_side_self_cycle(void) { return expect_error(",A\n1,=1+A1\n", CSV_ERROR_CYCLIC_DEPENDENCY); }
 static bool invalid_two_cell_cycle(void) { return expect_error(",A,B\n1,=B1+1,=A1+1\n", CSV_ERROR_CYCLIC_DEPENDENCY); }
 static bool invalid_long_cycle(void) { return expect_error(",A,B,C\n1,=B1+1,=C1+1,=A1+1\n", CSV_ERROR_CYCLIC_DEPENDENCY); }
 static bool invalid_add_overflow(void) { return expect_error(",A\n1,=9223372036854775807+1\n", CSV_ERROR_INTEGER_OVERFLOW); }
@@ -301,6 +302,7 @@ int main(void)
         {"invalid_division_by_zero_literal", invalid_division_by_zero_literal},
         {"invalid_division_by_zero_reference", invalid_division_by_zero_reference},
         {"invalid_self_cycle", invalid_self_cycle},
+        {"invalid_right_side_self_cycle", invalid_right_side_self_cycle},
         {"invalid_two_cell_cycle", invalid_two_cell_cycle},
         {"invalid_long_cycle", invalid_long_cycle},
         {"invalid_add_overflow", invalid_add_overflow},
