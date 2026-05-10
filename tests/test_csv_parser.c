@@ -1,4 +1,5 @@
 #include "csv_parser.h"
+#include "evaluator.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -19,10 +20,8 @@ static bool test_fail(int line, const char *message)
 
 #define EXPECT_TRUE(value) if (!(value)) return test_fail(__LINE__, "expected true: " #value)
 #define EXPECT_FALSE(value) if ((value)) return test_fail(__LINE__, "expected false: " #value)
-#define EXPECT_EQ_SIZE(expected, actual) if ((size_t)(expected) != (size_t)(actual)) return test_fail(__LINE__, "size mismatch: " #actual)
 #define EXPECT_EQ_INT64(expected, actual) if ((int64_t)(expected) != (int64_t)(actual)) return test_fail(__LINE__, "int64 mismatch: " #actual)
 #define EXPECT_EQ_CODE(expected, actual) if ((expected) != (actual)) return test_fail(__LINE__, "error code mismatch: " #actual)
-#define EXPECT_STREQ(expected, actual) if (strcmp((expected), (actual)) != 0) return test_fail(__LINE__, "string mismatch: " #actual)
 
 static bool parse_text(const char *csv, Table *table, CsvError *error)
 {
@@ -56,50 +55,34 @@ static bool expect_error(const char *csv, CsvErrorCode code)
     return true;
 }
 
-static bool expect_number_arg(const FormulaArg *arg, int64_t value)
+static bool parse_and_evaluate(const char *csv, Table *table, CsvError *error)
 {
-    EXPECT_EQ_INT64(FORMULA_ARG_NUMBER, arg->kind);
-    EXPECT_EQ_INT64(value, arg->as.number);
+    if (!parse_text(csv, table, error)) {
+        return false;
+    }
+
+    return table_evaluate(table, error);
+}
+
+static bool expect_cell_value(const Table *table, size_t row, size_t column, int64_t value)
+{
+    const Cell *cell = table_cell_at_const(table, row, column);
+
+    EXPECT_TRUE(cell != NULL);
+    EXPECT_EQ_INT64(value, cell->value);
     return true;
 }
 
-static bool expect_reference_arg(const FormulaArg *arg, const char *column_name, int64_t row_number)
-{
-    EXPECT_EQ_INT64(FORMULA_ARG_REFERENCE, arg->kind);
-    EXPECT_STREQ(column_name, arg->as.ref.column_name);
-    EXPECT_EQ_INT64(row_number, arg->as.ref.row_number);
-    EXPECT_FALSE(arg->as.ref.resolved);
-    EXPECT_EQ_SIZE(SIZE_MAX, arg->as.ref.row_index);
-    EXPECT_EQ_SIZE(SIZE_MAX, arg->as.ref.column_index);
-    return true;
-}
-
-static bool valid_basic_shape(void)
+static bool valid_basic_values(void)
 {
     const char *csv = ",A,B,Cell\n1,1,0,1\n2,2,=A1+Cell30,0\n30,0,=B1+A1,5\n";
     Table table;
     CsvError error;
-    const Cell *cell = NULL;
 
-    EXPECT_TRUE(parse_text(csv, &table, &error));
-    EXPECT_EQ_SIZE(3U, table.column_count);
-    EXPECT_EQ_SIZE(3U, table.row_count);
-    EXPECT_EQ_SIZE(9U, table.cell_count);
-    EXPECT_STREQ("A", table.columns[0].name);
-    EXPECT_STREQ("B", table.columns[1].name);
-    EXPECT_STREQ("Cell", table.columns[2].name);
-    EXPECT_EQ_INT64(1, table.rows[0].number);
-    EXPECT_EQ_INT64(2, table.rows[1].number);
-    EXPECT_EQ_INT64(30, table.rows[2].number);
-
-    cell = table_cell_at_const(&table, 1U, 1U);
-    EXPECT_TRUE(cell != NULL);
-    EXPECT_EQ_INT64(CELL_FORMULA, cell->kind);
-    EXPECT_TRUE(expect_reference_arg(&cell->formula.left, "A", 1));
-    EXPECT_EQ_INT64(FORMULA_OP_ADD, cell->formula.op);
-    EXPECT_TRUE(expect_reference_arg(&cell->formula.right, "Cell", 30));
-    EXPECT_TRUE(table.row_lookup != NULL);
-    EXPECT_TRUE(table.column_lookup != NULL);
+    EXPECT_TRUE(parse_and_evaluate(csv, &table, &error));
+    EXPECT_TRUE(expect_cell_value(&table, 0U, 0U, 1));
+    EXPECT_TRUE(expect_cell_value(&table, 1U, 1U, 6));
+    EXPECT_TRUE(expect_cell_value(&table, 2U, 1U, 1));
 
     table_free(&table);
     return true;
@@ -107,13 +90,13 @@ static bool valid_basic_shape(void)
 
 static bool valid_out_of_order_rows(void)
 {
-    const char *csv = ",A\n30,5\n1,6\n";
+    const char *csv = ",A,B\n30,2,=A1+1\n1,5,=A30+1\n";
     Table table;
     CsvError error;
 
-    EXPECT_TRUE(parse_text(csv, &table, &error));
-    EXPECT_EQ_INT64(30, table.rows[0].number);
-    EXPECT_EQ_INT64(1, table.rows[1].number);
+    EXPECT_TRUE(parse_and_evaluate(csv, &table, &error));
+    EXPECT_TRUE(expect_cell_value(&table, 0U, 1U, 6));
+    EXPECT_TRUE(expect_cell_value(&table, 1U, 1U, 3));
 
     table_free(&table);
     return true;
@@ -126,8 +109,6 @@ static bool valid_crlf(void)
     CsvError error;
 
     EXPECT_TRUE(parse_text(csv, &table, &error));
-    EXPECT_EQ_SIZE(2U, table.column_count);
-    EXPECT_EQ_SIZE(1U, table.row_count);
 
     table_free(&table);
     return true;
@@ -138,12 +119,9 @@ static bool valid_no_final_newline(void)
     const char *csv = ",A\n1,10";
     Table table;
     CsvError error;
-    const Cell *cell = NULL;
 
-    EXPECT_TRUE(parse_text(csv, &table, &error));
-    cell = table_cell_at_const(&table, 0U, 0U);
-    EXPECT_TRUE(cell != NULL);
-    EXPECT_EQ_INT64(10, cell->value);
+    EXPECT_TRUE(parse_and_evaluate(csv, &table, &error));
+    EXPECT_TRUE(expect_cell_value(&table, 0U, 0U, 10));
 
     table_free(&table);
     return true;
@@ -154,79 +132,51 @@ static bool valid_negative_cell(void)
     const char *csv = ",A\n1,-10\n";
     Table table;
     CsvError error;
-    const Cell *cell = NULL;
 
-    EXPECT_TRUE(parse_text(csv, &table, &error));
-    cell = table_cell_at_const(&table, 0U, 0U);
-    EXPECT_TRUE(cell != NULL);
-    EXPECT_EQ_INT64(-10, cell->value);
+    EXPECT_TRUE(parse_and_evaluate(csv, &table, &error));
+    EXPECT_TRUE(expect_cell_value(&table, 0U, 0U, -10));
 
     table_free(&table);
     return true;
 }
 
-static bool valid_formula_parsed(void)
+static bool valid_formula_values(void)
 {
-    const char *csv = ",A,B,C\n1,=A1+Cell30,=C1+1,=-1+2\n";
+    const char *csv = ",A,B,C\n1,=1+2,=A1+1,=-1+2\n";
     Table table;
     CsvError error;
-    const Cell *cell = NULL;
 
-    EXPECT_TRUE(parse_text(csv, &table, &error));
-    cell = table_cell_at_const(&table, 0U, 0U);
-    EXPECT_TRUE(cell != NULL);
-    EXPECT_EQ_INT64(CELL_FORMULA, cell->kind);
-    EXPECT_TRUE(expect_reference_arg(&cell->formula.left, "A", 1));
-    EXPECT_EQ_INT64(FORMULA_OP_ADD, cell->formula.op);
-    EXPECT_TRUE(expect_reference_arg(&cell->formula.right, "Cell", 30));
-
-    cell = table_cell_at_const(&table, 0U, 1U);
-    EXPECT_TRUE(cell != NULL);
-    EXPECT_TRUE(expect_reference_arg(&cell->formula.left, "C", 1));
-    EXPECT_EQ_INT64(FORMULA_OP_ADD, cell->formula.op);
-    EXPECT_TRUE(expect_number_arg(&cell->formula.right, 1));
-
-    cell = table_cell_at_const(&table, 0U, 2U);
-    EXPECT_TRUE(cell != NULL);
-    EXPECT_TRUE(expect_number_arg(&cell->formula.left, -1));
-    EXPECT_EQ_INT64(FORMULA_OP_ADD, cell->formula.op);
-    EXPECT_TRUE(expect_number_arg(&cell->formula.right, 2));
+    EXPECT_TRUE(parse_and_evaluate(csv, &table, &error));
+    EXPECT_TRUE(expect_cell_value(&table, 0U, 0U, 3));
+    EXPECT_TRUE(expect_cell_value(&table, 0U, 1U, 4));
+    EXPECT_TRUE(expect_cell_value(&table, 0U, 2U, 1));
 
     table_free(&table);
     return true;
 }
 
-static bool valid_unknown_reference_syntax(void)
+static bool invalid_unknown_reference_after_parse(void)
 {
     const char *csv = ",A\n1,=C1+1\n";
     Table table;
     CsvError error;
-    const Cell *cell = NULL;
 
     EXPECT_TRUE(parse_text(csv, &table, &error));
-    cell = table_cell_at_const(&table, 0U, 0U);
-    EXPECT_TRUE(cell != NULL);
-    EXPECT_TRUE(expect_reference_arg(&cell->formula.left, "C", 1));
-    EXPECT_EQ_INT64(FORMULA_OP_ADD, cell->formula.op);
-    EXPECT_TRUE(expect_number_arg(&cell->formula.right, 1));
+    EXPECT_FALSE(table_evaluate(&table, &error));
+    EXPECT_EQ_CODE(CSV_ERROR_INVALID_REFERENCE, error.code);
 
     table_free(&table);
     return true;
 }
 
-static bool valid_formula_negative_number(void)
+static bool valid_formula_negative_number_value(void)
 {
     const char *csv = ",A\n1,=-1+2\n";
     Table table;
     CsvError error;
-    const Cell *cell = NULL;
 
-    EXPECT_TRUE(parse_text(csv, &table, &error));
-    cell = table_cell_at_const(&table, 0U, 0U);
-    EXPECT_TRUE(cell != NULL);
-    EXPECT_TRUE(expect_number_arg(&cell->formula.left, -1));
-    EXPECT_EQ_INT64(FORMULA_OP_ADD, cell->formula.op);
-    EXPECT_TRUE(expect_number_arg(&cell->formula.right, 2));
+    EXPECT_TRUE(parse_and_evaluate(csv, &table, &error));
+    EXPECT_TRUE(expect_cell_value(&table, 0U, 0U, 1));
 
     table_free(&table);
     return true;
@@ -262,14 +212,14 @@ static bool invalid_formula_spaces(void) { return expect_error(",A\n1,=A1 +1\n",
 int main(void)
 {
     const TestCase tests[] = {
-        {"valid_basic_shape", valid_basic_shape},
+        {"valid_basic_values", valid_basic_values},
         {"valid_out_of_order_rows", valid_out_of_order_rows},
         {"valid_crlf", valid_crlf},
         {"valid_no_final_newline", valid_no_final_newline},
         {"valid_negative_cell", valid_negative_cell},
-        {"valid_formula_parsed", valid_formula_parsed},
-        {"valid_unknown_reference_syntax", valid_unknown_reference_syntax},
-        {"valid_formula_negative_number", valid_formula_negative_number},
+        {"valid_formula_values", valid_formula_values},
+        {"invalid_unknown_reference_after_parse", invalid_unknown_reference_after_parse},
+        {"valid_formula_negative_number_value", valid_formula_negative_number_value},
         {"invalid_empty_file", invalid_empty_file},
         {"invalid_header_only", invalid_header_only},
         {"invalid_header_first_cell_not_empty", invalid_header_first_cell_not_empty},

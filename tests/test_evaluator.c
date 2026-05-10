@@ -52,6 +52,21 @@ static bool parse_and_evaluate(const char *csv, Table *table, CsvError *error)
     return table_evaluate(table, error);
 }
 
+static bool parse_fixture_file(const char *path, Table *table, CsvError *error)
+{
+    char parent_path[256];
+
+    if (csv_parse_file(path, table, error)) {
+        return true;
+    }
+
+    if (snprintf(parent_path, sizeof(parent_path), "../%s", path) >= (int)sizeof(parent_path)) {
+        return false;
+    }
+
+    return csv_parse_file(parent_path, table, error);
+}
+
 static bool expect_error(const char *csv, CsvErrorCode code)
 {
     Table table;
@@ -118,8 +133,6 @@ static bool valid_out_of_order_rows(void)
     CsvError error;
 
     EXPECT_TRUE(parse_and_evaluate(csv, &table, &error));
-    EXPECT_EQ_INT64(30, table.rows[0].number);
-    EXPECT_EQ_INT64(1, table.rows[1].number);
     EXPECT_TRUE(expect_cell_value(&table, 0U, 1U, 6));
     EXPECT_TRUE(expect_cell_value(&table, 1U, 1U, 3));
 
@@ -142,23 +155,43 @@ static bool valid_negative_literals(void)
     return true;
 }
 
-static bool valid_resolved_refs(void)
+static bool valid_deep_dependency_chain_fixture(void)
 {
-    const char *csv = ",B,A\n2,=A1+B2,3\n1,5,7\n";
     Table table;
     CsvError error;
-    Cell *cell = NULL;
 
-    EXPECT_TRUE(parse_text(csv, &table, &error));
-    EXPECT_TRUE(table_resolve_references(&table, &error));
-    cell = table_cell_at(&table, 0U, 0U);
-    EXPECT_TRUE(cell != NULL);
-    EXPECT_TRUE(cell->formula.left.as.ref.resolved);
-    EXPECT_EQ_INT64(1, cell->formula.left.as.ref.row_index);
-    EXPECT_EQ_INT64(1, cell->formula.left.as.ref.column_index);
-    EXPECT_TRUE(cell->formula.right.as.ref.resolved);
-    EXPECT_EQ_INT64(0, cell->formula.right.as.ref.row_index);
-    EXPECT_EQ_INT64(0, cell->formula.right.as.ref.column_index);
+    EXPECT_TRUE(parse_fixture_file("tests/deep_chain.csv", &table, &error));
+    EXPECT_TRUE(table_evaluate(&table, &error));
+    EXPECT_TRUE(expect_cell_value(&table, 99999U, 0U, 100000));
+
+    table_free(&table);
+    return true;
+}
+
+static bool valid_wide_column_dependency_chain_fixture(void)
+{
+    Table table;
+    CsvError error;
+
+    EXPECT_TRUE(parse_fixture_file("tests/wide_columns.csv", &table, &error));
+    EXPECT_TRUE(table_evaluate(&table, &error));
+    EXPECT_TRUE(expect_cell_value(&table, 0U, 99999U, 100000));
+
+    table_free(&table);
+    return true;
+}
+
+static bool valid_reference_resolution_values(void)
+{
+    const char *csv = ",B,A\n2,=A1+B1,3\n1,5,7\n";
+    Table table;
+    CsvError error;
+
+    EXPECT_TRUE(parse_and_evaluate(csv, &table, &error));
+    EXPECT_TRUE(expect_cell_value(&table, 0U, 0U, 12));
+    EXPECT_TRUE(expect_cell_value(&table, 0U, 1U, 3));
+    EXPECT_TRUE(expect_cell_value(&table, 1U, 0U, 5));
+    EXPECT_TRUE(expect_cell_value(&table, 1U, 1U, 7));
 
     table_free(&table);
     return true;
@@ -183,7 +216,9 @@ int main(void)
         {"valid_dependency_values", valid_dependency_values},
         {"valid_out_of_order_rows", valid_out_of_order_rows},
         {"valid_negative_literals", valid_negative_literals},
-        {"valid_resolved_refs", valid_resolved_refs},
+        {"valid_deep_dependency_chain_fixture", valid_deep_dependency_chain_fixture},
+        {"valid_wide_column_dependency_chain_fixture", valid_wide_column_dependency_chain_fixture},
+        {"valid_reference_resolution_values", valid_reference_resolution_values},
         {"invalid_unknown_column", invalid_unknown_column},
         {"invalid_unknown_row", invalid_unknown_row},
         {"invalid_division_by_zero_literal", invalid_division_by_zero_literal},

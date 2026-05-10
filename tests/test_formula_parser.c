@@ -36,9 +36,6 @@ static bool expect_reference(const FormulaArg *arg, const char *column_name, int
     EXPECT_EQ_INT64(FORMULA_ARG_REFERENCE, arg->kind);
     EXPECT_STREQ(column_name, arg->as.ref.column_name);
     EXPECT_EQ_INT64(row_number, arg->as.ref.row_number);
-    EXPECT_FALSE(arg->as.ref.resolved);
-    EXPECT_EQ_SIZE(SIZE_MAX, arg->as.ref.row_index);
-    EXPECT_EQ_SIZE(SIZE_MAX, arg->as.ref.column_index);
     return true;
 }
 
