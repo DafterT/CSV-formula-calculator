@@ -162,7 +162,8 @@ static bool valid_deep_dependency_chain_fixture(void)
 
     EXPECT_TRUE(parse_fixture_file("tests/deep_chain.csv", &table, &error));
     EXPECT_TRUE(table_evaluate(&table, &error));
-    EXPECT_TRUE(expect_cell_value(&table, 99999U, 0U, 100000));
+    EXPECT_TRUE(expect_cell_value(&table, 0U, 0U, 500000));
+    EXPECT_TRUE(expect_cell_value(&table, 499999U, 0U, 1));
 
     table_free(&table);
     return true;
@@ -175,7 +176,8 @@ static bool valid_wide_column_dependency_chain_fixture(void)
 
     EXPECT_TRUE(parse_fixture_file("tests/wide_columns.csv", &table, &error));
     EXPECT_TRUE(table_evaluate(&table, &error));
-    EXPECT_TRUE(expect_cell_value(&table, 0U, 99999U, 100000));
+    EXPECT_TRUE(expect_cell_value(&table, 0U, 0U, 500000));
+    EXPECT_TRUE(expect_cell_value(&table, 0U, 499999U, 1));
 
     table_free(&table);
     return true;

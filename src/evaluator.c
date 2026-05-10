@@ -3,6 +3,17 @@
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+
+typedef struct {
+    Cell *cell;
+} EvalFrame;
+
+typedef struct {
+    EvalFrame *items;
+    size_t count;
+    size_t capacity;
+} EvalStack;
 
 static bool set_error(CsvError *error, CsvErrorCode code, size_t line, size_t field, const char *format, ...)
 {
@@ -87,6 +98,43 @@ static bool checked_div_i64(int64_t left, int64_t right, int64_t *result)
     return true;
 }
 
+static void eval_stack_free(EvalStack *stack)
+{
+    free(stack->items);
+    stack->items = NULL;
+    stack->count = 0U;
+    stack->capacity = 0U;
+}
+
+static bool eval_stack_push(EvalStack *stack, Cell *cell, CsvError *error)
+{
+    EvalFrame *grown = NULL;
+    size_t new_capacity = stack->capacity;
+
+    if (stack->count == stack->capacity) {
+        if (new_capacity == 0U) {
+            new_capacity = 64U;
+        } else {
+            if (new_capacity > (SIZE_MAX / 2U)) {
+                return set_error(error, CSV_ERROR_OUT_OF_MEMORY, 0U, 0U, "out of memory while evaluating formulas");
+            }
+            new_capacity *= 2U;
+        }
+
+        grown = realloc(stack->items, new_capacity * sizeof(stack->items[0]));
+        if (grown == NULL) {
+            return set_error(error, CSV_ERROR_OUT_OF_MEMORY, 0U, 0U, "out of memory while evaluating formulas");
+        }
+
+        stack->items = grown;
+        stack->capacity = new_capacity;
+    }
+
+    stack->items[stack->count].cell = cell;
+    stack->count++;
+    return true;
+}
+
 static bool resolve_ref(Table *table, FormulaRef *ref, const Cell *source_cell, CsvError *error)
 {
     size_t row_index = 0U;
@@ -144,9 +192,12 @@ bool table_resolve_references(Table *table, CsvError *error)
     return true;
 }
 
-static bool evaluate_cell(Table *table, Cell *cell, int64_t *value, CsvError *error);
+static Cell *cell_for_ref(Table *table, const FormulaRef *ref)
+{
+    return table_cell_at(table, ref->row_index, ref->column_index);
+}
 
-static bool evaluate_arg(Table *table, const FormulaArg *arg, int64_t *value, CsvError *error)
+static bool arg_value(Table *table, const FormulaArg *arg, int64_t *value)
 {
     Cell *target = NULL;
 
@@ -155,8 +206,13 @@ static bool evaluate_arg(Table *table, const FormulaArg *arg, int64_t *value, Cs
         return true;
     }
 
-    target = table_cell_at(table, arg->as.ref.row_index, arg->as.ref.column_index);
-    return evaluate_cell(table, target, value, error);
+    target = cell_for_ref(table, &arg->as.ref);
+    if (target == NULL) {
+        return false;
+    }
+
+    *value = target->value;
+    return true;
 }
 
 static bool apply_operator(const Cell *cell, int64_t left, int64_t right, int64_t *result, CsvError *error)
@@ -207,39 +263,94 @@ static bool apply_operator(const Cell *cell, int64_t left, int64_t right, int64_
     return true;
 }
 
-static bool evaluate_cell(Table *table, Cell *cell, int64_t *value, CsvError *error)
+static bool evaluate_cell(Table *table, Cell *root, int64_t *value, CsvError *error)
 {
-    int64_t left = 0;
-    int64_t right = 0;
-    int64_t result = 0;
+    EvalStack stack = {0};
 
-    if (cell->state == EVAL_DONE) {
-        *value = cell->value;
+    if (root->state == EVAL_DONE) {
+        *value = root->value;
         return true;
     }
 
-    if (cell->state == EVAL_VISITING) {
-        return set_error(
-            error,
-            CSV_ERROR_CYCLIC_DEPENDENCY,
-            cell->source_line,
-            cell->source_field,
-            "cyclic dependency at line %zu field %zu",
-            cell->source_line,
-            cell->source_field
-        );
-    }
-
-    cell->state = EVAL_VISITING;
-    if (!evaluate_arg(table, &cell->formula.left, &left, error) ||
-        !evaluate_arg(table, &cell->formula.right, &right, error) ||
-        !apply_operator(cell, left, right, &result, error)) {
+    if (!eval_stack_push(&stack, root, error)) {
         return false;
     }
 
-    cell->value = result;
-    cell->state = EVAL_DONE;
-    *value = result;
+    while (stack.count > 0U) {
+        Cell *cell = stack.items[stack.count - 1U].cell;
+        Cell *target = NULL;
+
+        if (cell->state == EVAL_DONE) {
+            stack.count--;
+            continue;
+        }
+
+        if (cell->state == EVAL_NOT_VISITED) {
+            cell->state = EVAL_VISITING;
+        }
+
+        if (cell->formula.left.kind == FORMULA_ARG_REFERENCE) {
+            target = cell_for_ref(table, &cell->formula.left.as.ref);
+            if (target == NULL) {
+                eval_stack_free(&stack);
+                return set_error(error, CSV_ERROR_INVALID_REFERENCE, 0U, 0U, "invalid resolved reference");
+            }
+
+            if (target->state == EVAL_VISITING) {
+                eval_stack_free(&stack);
+                return set_error(error, CSV_ERROR_CYCLIC_DEPENDENCY, target->source_line, target->source_field, "cyclic dependency at line %zu field %zu", target->source_line, target->source_field);
+            }
+
+            if (target->state == EVAL_NOT_VISITED) {
+                if (!eval_stack_push(&stack, target, error)) {
+                    eval_stack_free(&stack);
+                    return false;
+                }
+                continue;
+            }
+        }
+
+        if (cell->formula.right.kind == FORMULA_ARG_REFERENCE) {
+            target = cell_for_ref(table, &cell->formula.right.as.ref);
+            if (target == NULL) {
+                eval_stack_free(&stack);
+                return set_error(error, CSV_ERROR_INVALID_REFERENCE, 0U, 0U, "invalid resolved reference");
+            }
+
+            if (target->state == EVAL_VISITING) {
+                eval_stack_free(&stack);
+                return set_error(error, CSV_ERROR_CYCLIC_DEPENDENCY, target->source_line, target->source_field, "cyclic dependency at line %zu field %zu", target->source_line, target->source_field);
+            }
+
+            if (target->state == EVAL_NOT_VISITED) {
+                if (!eval_stack_push(&stack, target, error)) {
+                    eval_stack_free(&stack);
+                    return false;
+                }
+                continue;
+            }
+        }
+
+        {
+            int64_t left = 0;
+            int64_t right = 0;
+            int64_t result = 0;
+
+            if (!arg_value(table, &cell->formula.left, &left) ||
+                !arg_value(table, &cell->formula.right, &right) ||
+                !apply_operator(cell, left, right, &result, error)) {
+                eval_stack_free(&stack);
+                return false;
+            }
+
+            cell->value = result;
+            cell->state = EVAL_DONE;
+            stack.count--;
+        }
+    }
+
+    *value = root->value;
+    eval_stack_free(&stack);
     return true;
 }
 
