@@ -8,6 +8,7 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 add_library(csv_core
     src/csv_parser.c
+    src/evaluator.c
     src/formula.c
     src/table.c
 )
@@ -32,3 +33,9 @@ target_link_libraries(formula_parser_tests PRIVATE csv_core)
 target_compile_options(formula_parser_tests PRIVATE -Wall -Wextra -Wpedantic)
 
 add_test(NAME formula_parser_tests COMMAND formula_parser_tests)
+
+add_executable(evaluator_tests tests/test_evaluator.c)
+target_link_libraries(evaluator_tests PRIVATE csv_core)
+target_compile_options(evaluator_tests PRIVATE -Wall -Wextra -Wpedantic)
+
+add_test(NAME evaluator_tests COMMAND evaluator_tests)

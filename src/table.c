@@ -3,6 +3,30 @@
 #include <stdlib.h>
 #include <string.h>
 
+static int compare_row_lookup(const void *left, const void *right)
+{
+    const RowLookup *left_row = left;
+    const RowLookup *right_row = right;
+
+    if (left_row->number < right_row->number) {
+        return -1;
+    }
+
+    if (left_row->number > right_row->number) {
+        return 1;
+    }
+
+    return 0;
+}
+
+static int compare_column_lookup(const void *left, const void *right)
+{
+    const ColumnLookup *left_column = left;
+    const ColumnLookup *right_column = right;
+
+    return strcmp(left_column->name, right_column->name);
+}
+
 static char *copy_string(const char *text)
 {
     size_t length = strlen(text);
@@ -237,7 +261,63 @@ bool table_build_lookups(Table *table)
         index++;
     }
 
+    if (table->row_count > 1U) {
+        qsort(table->row_lookup, table->row_count, sizeof(table->row_lookup[0]), compare_row_lookup);
+    }
+
+    if (table->column_count > 1U) {
+        qsort(table->column_lookup, table->column_count, sizeof(table->column_lookup[0]), compare_column_lookup);
+    }
+
     return true;
+}
+
+bool table_find_row(const Table *table, int64_t number, size_t *row_index)
+{
+    size_t left = 0U;
+    size_t right = table->row_count;
+
+    while (left < right) {
+        size_t middle = left + ((right - left) / 2U);
+        int64_t middle_number = table->row_lookup[middle].number;
+
+        if (middle_number == number) {
+            *row_index = table->row_lookup[middle].row_index;
+            return true;
+        }
+
+        if (middle_number < number) {
+            left = middle + 1U;
+        } else {
+            right = middle;
+        }
+    }
+
+    return false;
+}
+
+bool table_find_column(const Table *table, const char *name, size_t *column_index)
+{
+    size_t left = 0U;
+    size_t right = table->column_count;
+
+    while (left < right) {
+        size_t middle = left + ((right - left) / 2U);
+        int comparison = strcmp(table->column_lookup[middle].name, name);
+
+        if (comparison == 0) {
+            *column_index = table->column_lookup[middle].column_index;
+            return true;
+        }
+
+        if (comparison < 0) {
+            left = middle + 1U;
+        } else {
+            right = middle;
+        }
+    }
+
+    return false;
 }
 
 size_t table_cell_index(const Table *table, size_t row_index, size_t column_index)
