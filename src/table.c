@@ -1,7 +1,21 @@
 #include "table.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+static bool set_table_error(CsvError *error, CsvErrorCode code, size_t line, size_t field, const char *message)
+{
+    if (error == NULL) {
+        return false;
+    }
+
+    error->code = code;
+    error->line = line;
+    error->field = field;
+    (void)snprintf(error->message, sizeof(error->message), "%s", message);
+    return false;
+}
 
 static int compare_row_lookup(const void *left, const void *right)
 {
@@ -223,7 +237,51 @@ bool table_add_formula_cell(Table *table, ParsedFormula *formula, size_t source_
     return true;
 }
 
-bool table_build_lookups(Table *table)
+static bool validate_unique_rows(const Table *table, CsvError *error)
+{
+    size_t index = 1U;
+
+    while (index < table->row_count) {
+        const RowLookup *previous = &table->row_lookup[index - 1U];
+        const RowLookup *current = &table->row_lookup[index];
+
+        if (previous->number == current->number) {
+            const Row *row = &table->rows[current->row_index];
+            char message[256];
+
+            (void)snprintf(message, sizeof(message), "duplicate row number %lld", (long long)current->number);
+            return set_table_error(error, CSV_ERROR_DUPLICATE_ROW, row->source_line, 1U, message);
+        }
+
+        index++;
+    }
+
+    return true;
+}
+
+static bool validate_unique_columns(const Table *table, CsvError *error)
+{
+    size_t index = 1U;
+
+    while (index < table->column_count) {
+        const ColumnLookup *previous = &table->column_lookup[index - 1U];
+        const ColumnLookup *current = &table->column_lookup[index];
+
+        if (strcmp(previous->name, current->name) == 0) {
+            const Column *column = &table->columns[current->column_index];
+            char message[256];
+
+            (void)snprintf(message, sizeof(message), "duplicate column '%s'", current->name);
+            return set_table_error(error, CSV_ERROR_DUPLICATE_COLUMN, 1U, column->source_field, message);
+        }
+
+        index++;
+    }
+
+    return true;
+}
+
+bool table_build_lookups(Table *table, CsvError *error)
 {
     size_t index = 0U;
 
@@ -267,6 +325,11 @@ bool table_build_lookups(Table *table)
 
     if (table->column_count > 1U) {
         qsort(table->column_lookup, table->column_count, sizeof(table->column_lookup[0]), compare_column_lookup);
+    }
+
+    if (!validate_unique_rows(table, error) ||
+        !validate_unique_columns(table, error)) {
+        return false;
     }
 
     return true;

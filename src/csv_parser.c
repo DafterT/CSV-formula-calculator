@@ -6,7 +6,6 @@
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <string.h>
 
 typedef struct {
     char *data;
@@ -194,34 +193,6 @@ static bool is_valid_column_name(const char *name)
     return true;
 }
 
-static bool has_column(const Table *table, const char *name)
-{
-    size_t index = 0U;
-
-    while (index < table->column_count) {
-        if (strcmp(table->columns[index].name, name) == 0) {
-            return true;
-        }
-        index++;
-    }
-
-    return false;
-}
-
-static bool has_row(const Table *table, int64_t number)
-{
-    size_t index = 0U;
-
-    while (index < table->row_count) {
-        if (table->rows[index].number == number) {
-            return true;
-        }
-        index++;
-    }
-
-    return false;
-}
-
 static bool parse_unsigned_int64_strict(const char *text, int64_t *value, bool *overflow)
 {
     char *end = NULL;
@@ -305,10 +276,6 @@ static bool add_column(Parser *parser, size_t line, size_t field)
         return set_error(parser->error, CSV_ERROR_INVALID_HEADER, line, field, "invalid column name at line %zu field %zu", line, field);
     }
 
-    if (has_column(parser->table, name)) {
-        return set_error(parser->error, CSV_ERROR_DUPLICATE_COLUMN, line, field, "duplicate column '%s'", name);
-    }
-
     if (!table_add_column(parser->table, name, field)) {
         return set_error(parser->error, CSV_ERROR_OUT_OF_MEMORY, line, field, "out of memory while adding column");
     }
@@ -368,10 +335,6 @@ static bool parse_row_number(Parser *parser, size_t line, size_t field, int64_t 
 
     if (*row_number == 0) {
         return set_error(parser->error, CSV_ERROR_INVALID_ROW_NUMBER, line, field, "row number must be positive at line %zu", line);
-    }
-
-    if (has_row(parser->table, *row_number)) {
-        return set_error(parser->error, CSV_ERROR_DUPLICATE_ROW, line, field, "duplicate row number %lld", (long long)*row_number);
     }
 
     return true;
@@ -524,8 +487,12 @@ bool csv_parse_stream(FILE *stream, Table *table, CsvError *error)
         }
     }
 
-    if (ok && !table_build_lookups(table)) {
-        ok = set_error(error, CSV_ERROR_OUT_OF_MEMORY, 0U, 0U, "out of memory while building lookup tables");
+    if (ok && !table_build_lookups(table, error)) {
+        if (error == NULL || error->code == CSV_ERROR_NONE) {
+            ok = set_error(error, CSV_ERROR_OUT_OF_MEMORY, 0U, 0U, "out of memory while building lookup tables");
+        } else {
+            ok = false;
+        }
     }
 
     field_buffer_free(&parser.field);

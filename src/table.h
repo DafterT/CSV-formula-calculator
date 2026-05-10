@@ -72,7 +72,7 @@ bool table_add_column(Table *table, const char *name, size_t source_field);
 bool table_add_row(Table *table, int64_t number, size_t source_line, size_t *row_index);
 bool table_add_number_cell(Table *table, int64_t value, size_t source_line, size_t source_field);
 bool table_add_formula_cell(Table *table, ParsedFormula *formula, size_t source_line, size_t source_field);
-bool table_build_lookups(Table *table);
+bool table_build_lookups(Table *table, CsvError *error);
 bool table_find_row(const Table *table, int64_t number, size_t *row_index);
 bool table_find_column(const Table *table, const char *name, size_t *column_index);
 
