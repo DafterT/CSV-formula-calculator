@@ -11,6 +11,7 @@ add_library(csv_core
     src/error.c
     src/evaluator.c
     src/formula.c
+    src/int_parse.c
     src/table.c
 )
 
