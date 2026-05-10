@@ -353,6 +353,12 @@ bool table_evaluate(Table *table, CsvError *error)
 {
     size_t index = 0U;
 
+    if (table == NULL ||
+        (table->row_count > 0U && table->row_lookup == NULL) ||
+        (table->column_count > 0U && table->column_lookup == NULL)) {
+        return csv_error_set(error, CSV_ERROR_MALFORMED, 0U, 0U, "table lookup tables are not built");
+    }
+
     if (!table_resolve_references(table, error)) {
         return false;
     }

@@ -65,6 +65,17 @@ typedef struct {
     ColumnLookup *column_lookup;
 } Table;
 
+/*
+ * Порядок использования Table:
+ * 1. table_init().
+ * 2. Добавить колонки, строки и ровно column_count ячеек на каждую строку.
+ * 3. table_build_lookups() после заполнения таблицы.
+ * 4. table_find_row() / table_find_column() только после table_build_lookups().
+ *
+ * table_find_* возвращают false, если lookup-массивы не построены.
+ * table_cell_at* возвращают NULL, если row/column или flat-index вне cells.
+ */
+
 void table_init(Table *table);
 void table_free(Table *table);
 

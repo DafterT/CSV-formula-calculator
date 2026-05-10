@@ -199,6 +199,77 @@ static bool valid_reference_resolution_values(void)
     return true;
 }
 
+static bool table_lookup_requires_build(void)
+{
+    Table table;
+    size_t index = 99U;
+
+    table_init(&table);
+    EXPECT_TRUE(table_add_column(&table, "A", 2U));
+    EXPECT_TRUE(table_add_row(&table, 1, 2U, NULL));
+    EXPECT_TRUE(table_add_number_cell(&table, 10, 2U, 2U));
+    EXPECT_FALSE(table_find_row(&table, 1, &index));
+    EXPECT_FALSE(table_find_column(&table, "A", &index));
+
+    table_free(&table);
+    return true;
+}
+
+static bool table_cell_at_rejects_incomplete_row(void)
+{
+    Table table;
+
+    table_init(&table);
+    EXPECT_TRUE(table_add_column(&table, "A", 2U));
+    EXPECT_TRUE(table_add_column(&table, "B", 3U));
+    EXPECT_TRUE(table_add_row(&table, 1, 2U, NULL));
+    EXPECT_TRUE(table_add_number_cell(&table, 10, 2U, 2U));
+    EXPECT_TRUE(table_cell_at(&table, 0U, 0U) != NULL);
+    EXPECT_TRUE(table_cell_at(&table, 0U, 1U) == NULL);
+    EXPECT_TRUE(table_cell_at_const(&table, 0U, 1U) == NULL);
+
+    table_free(&table);
+    return true;
+}
+
+static bool table_build_lookups_rejects_incomplete_table(void)
+{
+    Table table;
+    CsvError error;
+    size_t index = 99U;
+
+    table_init(&table);
+    csv_error_clear(&error);
+    EXPECT_TRUE(table_add_column(&table, "A", 2U));
+    EXPECT_TRUE(table_add_column(&table, "B", 3U));
+    EXPECT_TRUE(table_add_row(&table, 1, 2U, NULL));
+    EXPECT_TRUE(table_add_number_cell(&table, 10, 2U, 2U));
+    EXPECT_FALSE(table_build_lookups(&table, &error));
+    EXPECT_EQ_CODE(CSV_ERROR_MALFORMED, error.code);
+    EXPECT_FALSE(table_find_row(&table, 1, &index));
+
+    table_free(&table);
+    return true;
+}
+
+static bool invalid_incomplete_table_evaluate(void)
+{
+    Table table;
+    CsvError error;
+
+    table_init(&table);
+    csv_error_clear(&error);
+    EXPECT_TRUE(table_add_column(&table, "A", 2U));
+    EXPECT_TRUE(table_add_column(&table, "B", 3U));
+    EXPECT_TRUE(table_add_row(&table, 1, 2U, NULL));
+    EXPECT_TRUE(table_add_number_cell(&table, 10, 2U, 2U));
+    EXPECT_FALSE(table_evaluate(&table, &error));
+    EXPECT_EQ_CODE(CSV_ERROR_MALFORMED, error.code);
+
+    table_free(&table);
+    return true;
+}
+
 static bool invalid_unknown_column(void) { return expect_error(",A\n1,=B1+1\n", CSV_ERROR_INVALID_REFERENCE); }
 static bool invalid_unknown_row(void) { return expect_error(",A\n1,=A2+1\n", CSV_ERROR_INVALID_REFERENCE); }
 static bool invalid_division_by_zero_literal(void) { return expect_error(",A\n1,=1/0\n", CSV_ERROR_DIVISION_BY_ZERO); }
@@ -221,6 +292,10 @@ int main(void)
         {"valid_deep_dependency_chain_fixture", valid_deep_dependency_chain_fixture},
         {"valid_wide_column_dependency_chain_fixture", valid_wide_column_dependency_chain_fixture},
         {"valid_reference_resolution_values", valid_reference_resolution_values},
+        {"table_lookup_requires_build", table_lookup_requires_build},
+        {"table_cell_at_rejects_incomplete_row", table_cell_at_rejects_incomplete_row},
+        {"table_build_lookups_rejects_incomplete_table", table_build_lookups_rejects_incomplete_table},
+        {"invalid_incomplete_table_evaluate", invalid_incomplete_table_evaluate},
         {"invalid_unknown_column", invalid_unknown_column},
         {"invalid_unknown_row", invalid_unknown_row},
         {"invalid_division_by_zero_literal", invalid_division_by_zero_literal},

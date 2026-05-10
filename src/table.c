@@ -40,6 +40,35 @@ static char *copy_string(const char *text)
     return copy;
 }
 
+static bool checked_cell_index(const Table *table, size_t row_index, size_t column_index, size_t *cell_index)
+{
+    size_t index = 0U;
+
+    if (table == NULL || cell_index == NULL) {
+        return false;
+    }
+
+    if (row_index >= table->row_count || column_index >= table->column_count) {
+        return false;
+    }
+
+    if (table->rows == NULL || table->cells == NULL) {
+        return false;
+    }
+
+    if (table->rows[row_index].first_cell > SIZE_MAX - column_index) {
+        return false;
+    }
+
+    index = table->rows[row_index].first_cell + column_index;
+    if (index >= table->cell_count) {
+        return false;
+    }
+
+    *cell_index = index;
+    return true;
+}
+
 static void *grow_array(void *items, size_t item_size, size_t *capacity, size_t needed)
 {
     size_t new_capacity = *capacity;
@@ -281,10 +310,28 @@ bool table_build_lookups(Table *table, CsvError *error)
 {
     size_t index = 0U;
 
+    if (table == NULL) {
+        return csv_error_set(error, CSV_ERROR_MALFORMED, 0U, 0U, "table is not rectangular");
+    }
+
     free(table->row_lookup);
     free(table->column_lookup);
     table->row_lookup = NULL;
     table->column_lookup = NULL;
+
+    if ((table->column_count > 0U && table->columns == NULL) ||
+        (table->row_count > 0U && table->rows == NULL) ||
+        (table->cell_count > 0U && table->cells == NULL)) {
+        return csv_error_set(error, CSV_ERROR_MALFORMED, 0U, 0U, "table is not rectangular");
+    }
+
+    if (table->row_count > 0U && table->column_count > SIZE_MAX / table->row_count) {
+        return csv_error_set(error, CSV_ERROR_MALFORMED, 0U, 0U, "table is not rectangular");
+    }
+
+    if (table->cell_count != table->row_count * table->column_count) {
+        return csv_error_set(error, CSV_ERROR_MALFORMED, 0U, 0U, "table is not rectangular");
+    }
 
     if (table->row_count > 0U) {
         table->row_lookup = malloc(table->row_count * sizeof(table->row_lookup[0]));
@@ -325,6 +372,10 @@ bool table_build_lookups(Table *table, CsvError *error)
 
     if (!validate_unique_rows(table, error) ||
         !validate_unique_columns(table, error)) {
+        free(table->row_lookup);
+        free(table->column_lookup);
+        table->row_lookup = NULL;
+        table->column_lookup = NULL;
         return false;
     }
 
@@ -334,7 +385,13 @@ bool table_build_lookups(Table *table, CsvError *error)
 bool table_find_row(const Table *table, int64_t number, size_t *row_index)
 {
     size_t left = 0U;
-    size_t right = table->row_count;
+    size_t right = 0U;
+
+    if (table == NULL || row_index == NULL || table->row_lookup == NULL) {
+        return false;
+    }
+
+    right = table->row_count;
 
     while (left < right) {
         size_t middle = left + ((right - left) / 2U);
@@ -358,7 +415,13 @@ bool table_find_row(const Table *table, int64_t number, size_t *row_index)
 bool table_find_column(const Table *table, const char *name, size_t *column_index)
 {
     size_t left = 0U;
-    size_t right = table->column_count;
+    size_t right = 0U;
+
+    if (table == NULL || name == NULL || column_index == NULL || table->column_lookup == NULL) {
+        return false;
+    }
+
+    right = table->column_count;
 
     while (left < right) {
         size_t middle = left + ((right - left) / 2U);
@@ -386,18 +449,22 @@ size_t table_cell_index(const Table *table, size_t row_index, size_t column_inde
 
 Cell *table_cell_at(Table *table, size_t row_index, size_t column_index)
 {
-    if (row_index >= table->row_count || column_index >= table->column_count) {
+    size_t cell_index = 0U;
+
+    if (!checked_cell_index(table, row_index, column_index, &cell_index)) {
         return NULL;
     }
 
-    return &table->cells[table_cell_index(table, row_index, column_index)];
+    return &table->cells[cell_index];
 }
 
 const Cell *table_cell_at_const(const Table *table, size_t row_index, size_t column_index)
 {
-    if (row_index >= table->row_count || column_index >= table->column_count) {
+    size_t cell_index = 0U;
+
+    if (!checked_cell_index(table, row_index, column_index, &cell_index)) {
         return NULL;
     }
 
-    return &table->cells[table_cell_index(table, row_index, column_index)];
+    return &table->cells[cell_index];
 }

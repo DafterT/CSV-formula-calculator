@@ -182,6 +182,23 @@ static bool valid_formula_negative_number_value(void)
     return true;
 }
 
+static bool valid_parse_builds_lookups(void)
+{
+    const char *csv = ",B,A\n2,5,7\n";
+    Table table;
+    CsvError error;
+    size_t index = 99U;
+
+    EXPECT_TRUE(parse_text(csv, &table, &error));
+    EXPECT_TRUE(table_find_row(&table, 2, &index));
+    EXPECT_EQ_INT64(0, index);
+    EXPECT_TRUE(table_find_column(&table, "A", &index));
+    EXPECT_EQ_INT64(1, index);
+
+    table_free(&table);
+    return true;
+}
+
 static bool invalid_empty_file(void) { return expect_error("", CSV_ERROR_EMPTY_FILE); }
 static bool invalid_header_only(void) { return expect_error(",A\n", CSV_ERROR_INVALID_HEADER); }
 static bool invalid_header_first_cell_not_empty(void) { return expect_error("X,A\n1,2\n", CSV_ERROR_INVALID_HEADER); }
@@ -220,6 +237,7 @@ int main(void)
         {"valid_formula_values", valid_formula_values},
         {"invalid_unknown_reference_after_parse", invalid_unknown_reference_after_parse},
         {"valid_formula_negative_number_value", valid_formula_negative_number_value},
+        {"valid_parse_builds_lookups", valid_parse_builds_lookups},
         {"invalid_empty_file", invalid_empty_file},
         {"invalid_header_only", invalid_header_only},
         {"invalid_header_first_cell_not_empty", invalid_header_first_cell_not_empty},
