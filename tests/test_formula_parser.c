@@ -186,6 +186,58 @@ static bool formula_unknown_reference_syntax(void)
     return true;
 }
 
+static bool formula_int64_max_number(void)
+{
+    ParsedFormula formula;
+    CsvError error;
+
+    EXPECT_TRUE(parse_formula("=9223372036854775807+0", &formula, &error));
+    EXPECT_TRUE(expect_number(&formula.left, INT64_MAX));
+    EXPECT_EQ_INT64(FORMULA_OP_ADD, formula.op);
+    EXPECT_TRUE(expect_number(&formula.right, 0));
+    formula_free(&formula);
+    return true;
+}
+
+static bool formula_int64_min_number(void)
+{
+    ParsedFormula formula;
+    CsvError error;
+
+    EXPECT_TRUE(parse_formula("=-9223372036854775808+0", &formula, &error));
+    EXPECT_TRUE(expect_number(&formula.left, INT64_MIN));
+    EXPECT_EQ_INT64(FORMULA_OP_ADD, formula.op);
+    EXPECT_TRUE(expect_number(&formula.right, 0));
+    formula_free(&formula);
+    return true;
+}
+
+static bool formula_negative_zero_number(void)
+{
+    ParsedFormula formula;
+    CsvError error;
+
+    EXPECT_TRUE(parse_formula("=-0+1", &formula, &error));
+    EXPECT_TRUE(expect_number(&formula.left, 0));
+    EXPECT_EQ_INT64(FORMULA_OP_ADD, formula.op);
+    EXPECT_TRUE(expect_number(&formula.right, 1));
+    formula_free(&formula);
+    return true;
+}
+
+static bool formula_max_reference_row(void)
+{
+    ParsedFormula formula;
+    CsvError error;
+
+    EXPECT_TRUE(parse_formula("=A9223372036854775807+1", &formula, &error));
+    EXPECT_TRUE(expect_reference(&formula.left, "A", INT64_MAX));
+    EXPECT_EQ_INT64(FORMULA_OP_ADD, formula.op);
+    EXPECT_TRUE(expect_number(&formula.right, 1));
+    formula_free(&formula);
+    return true;
+}
+
 static bool invalid_empty_formula(void) { return expect_error("=", CSV_ERROR_INVALID_FORMULA); }
 static bool invalid_missing_operator(void) { return expect_error("=A1", CSV_ERROR_INVALID_FORMULA); }
 static bool invalid_missing_right_arg(void) { return expect_error("=A1+", CSV_ERROR_INVALID_FORMULA); }
@@ -201,6 +253,11 @@ static bool invalid_space_after_equal(void) { return expect_error("= A1+B1", CSV
 static bool invalid_trailing_space(void) { return expect_error("=A1+B1 ", CSV_ERROR_INVALID_FORMULA); }
 static bool invalid_space_before_number(void) { return expect_error("=A1/ 2", CSV_ERROR_INVALID_FORMULA); }
 static bool invalid_formula_overflow(void) { return expect_error("=A1+999999999999999999999999999999", CSV_ERROR_INTEGER_OVERFLOW); }
+static bool invalid_formula_max_plus_one(void) { return expect_error("=9223372036854775808+0", CSV_ERROR_INTEGER_OVERFLOW); }
+static bool invalid_formula_min_minus_one(void) { return expect_error("=-9223372036854775809+0", CSV_ERROR_INTEGER_OVERFLOW); }
+static bool invalid_formula_overflow_suffix(void) { return expect_error("=9223372036854775808A+0", CSV_ERROR_INTEGER_OVERFLOW); }
+static bool invalid_reference_row_overflow(void) { return expect_error("=A9223372036854775808+1", CSV_ERROR_INTEGER_OVERFLOW); }
+static bool invalid_reference_row_overflow_suffix(void) { return expect_error("=A9223372036854775808B+1", CSV_ERROR_INTEGER_OVERFLOW); }
 static bool invalid_negative_reference_row(void) { return expect_error("=A-1+2", CSV_ERROR_INVALID_FORMULA); }
 static bool invalid_operator_without_arg(void) { return expect_error("=A1/", CSV_ERROR_INVALID_FORMULA); }
 static bool invalid_double_negative_number(void) { return expect_error("=--1+A1", CSV_ERROR_INVALID_FORMULA); }
@@ -218,6 +275,10 @@ int main(void)
         {"formula_underscore_column", formula_underscore_column},
         {"formula_two_numbers", formula_two_numbers},
         {"formula_unknown_reference_syntax", formula_unknown_reference_syntax},
+        {"formula_int64_max_number", formula_int64_max_number},
+        {"formula_int64_min_number", formula_int64_min_number},
+        {"formula_negative_zero_number", formula_negative_zero_number},
+        {"formula_max_reference_row", formula_max_reference_row},
         {"invalid_empty_formula", invalid_empty_formula},
         {"invalid_missing_operator", invalid_missing_operator},
         {"invalid_missing_right_arg", invalid_missing_right_arg},
@@ -233,6 +294,11 @@ int main(void)
         {"invalid_trailing_space", invalid_trailing_space},
         {"invalid_space_before_number", invalid_space_before_number},
         {"invalid_formula_overflow", invalid_formula_overflow},
+        {"invalid_formula_max_plus_one", invalid_formula_max_plus_one},
+        {"invalid_formula_min_minus_one", invalid_formula_min_minus_one},
+        {"invalid_formula_overflow_suffix", invalid_formula_overflow_suffix},
+        {"invalid_reference_row_overflow", invalid_reference_row_overflow},
+        {"invalid_reference_row_overflow_suffix", invalid_reference_row_overflow_suffix},
         {"invalid_negative_reference_row", invalid_negative_reference_row},
         {"invalid_operator_without_arg", invalid_operator_without_arg},
         {"invalid_double_negative_number", invalid_double_negative_number}

@@ -140,6 +140,36 @@ static bool valid_negative_cell(void)
     return true;
 }
 
+static bool valid_integer_boundaries(void)
+{
+    const char *csv = ",A,B,C\n1,9223372036854775807,-9223372036854775808,-0\n";
+    Table table;
+    CsvError error;
+
+    EXPECT_TRUE(parse_and_evaluate(csv, &table, &error));
+    EXPECT_TRUE(expect_cell_value(&table, 0U, 0U, INT64_MAX));
+    EXPECT_TRUE(expect_cell_value(&table, 0U, 1U, INT64_MIN));
+    EXPECT_TRUE(expect_cell_value(&table, 0U, 2U, 0));
+
+    table_free(&table);
+    return true;
+}
+
+static bool valid_max_row_number(void)
+{
+    const char *csv = ",A\n9223372036854775807,1\n";
+    Table table;
+    CsvError error;
+    size_t index = 99U;
+
+    EXPECT_TRUE(parse_text(csv, &table, &error));
+    EXPECT_TRUE(table_find_row(&table, INT64_MAX, &index));
+    EXPECT_EQ_INT64(0, index);
+
+    table_free(&table);
+    return true;
+}
+
 static bool valid_formula_values(void)
 {
     const char *csv = ",A,B,C\n1,=1+2,=A1+1,=-1+2\n";
@@ -213,6 +243,7 @@ static bool invalid_zero_row_number(void) { return expect_error(",A\n0,1\n", CSV
 static bool invalid_negative_row_number(void) { return expect_error(",A\n-1,1\n", CSV_ERROR_INVALID_ROW_NUMBER); }
 static bool invalid_plus_row_number(void) { return expect_error(",A\n+10,1\n", CSV_ERROR_INVALID_ROW_NUMBER); }
 static bool invalid_row_number_overflow(void) { return expect_error(",A\n999999999999999999999999999999,1\n", CSV_ERROR_INTEGER_OVERFLOW); }
+static bool invalid_row_number_overflow_suffix(void) { return expect_error(",A\n9223372036854775808abc,1\n", CSV_ERROR_INVALID_ROW_NUMBER); }
 static bool invalid_duplicate_row(void) { return expect_error(",A\n1,1\n1,2\n", CSV_ERROR_DUPLICATE_ROW); }
 static bool invalid_too_few_fields(void) { return expect_error(",A,B\n1,1\n", CSV_ERROR_MALFORMED); }
 static bool invalid_too_many_fields(void) { return expect_error(",A\n1,1,2\n", CSV_ERROR_MALFORMED); }
@@ -220,6 +251,9 @@ static bool invalid_empty_cell(void) { return expect_error(",A\n1,\n", CSV_ERROR
 static bool invalid_bad_integer_cell(void) { return expect_error(",A\n1,abc\n", CSV_ERROR_INVALID_CELL); }
 static bool invalid_plus_integer_cell(void) { return expect_error(",A\n1,+10\n", CSV_ERROR_INVALID_CELL); }
 static bool invalid_integer_overflow(void) { return expect_error(",A\n1,999999999999999999999999999999\n", CSV_ERROR_INTEGER_OVERFLOW); }
+static bool invalid_integer_max_plus_one(void) { return expect_error(",A\n1,9223372036854775808\n", CSV_ERROR_INTEGER_OVERFLOW); }
+static bool invalid_integer_min_minus_one(void) { return expect_error(",A\n1,-9223372036854775809\n", CSV_ERROR_INTEGER_OVERFLOW); }
+static bool invalid_integer_overflow_suffix(void) { return expect_error(",A\n1,9223372036854775808abc\n", CSV_ERROR_INVALID_CELL); }
 static bool invalid_quote(void) { return expect_error(",A\n1,\"1\"\n", CSV_ERROR_MALFORMED); }
 static bool invalid_bare_cr(void) { return expect_error(",A\r1,1\n", CSV_ERROR_MALFORMED); }
 static bool invalid_empty_line(void) { return expect_error(",A\n\n1,1\n", CSV_ERROR_MALFORMED); }
@@ -234,6 +268,8 @@ int main(void)
         {"valid_crlf", valid_crlf},
         {"valid_no_final_newline", valid_no_final_newline},
         {"valid_negative_cell", valid_negative_cell},
+        {"valid_integer_boundaries", valid_integer_boundaries},
+        {"valid_max_row_number", valid_max_row_number},
         {"valid_formula_values", valid_formula_values},
         {"invalid_unknown_reference_after_parse", invalid_unknown_reference_after_parse},
         {"valid_formula_negative_number_value", valid_formula_negative_number_value},
@@ -252,6 +288,7 @@ int main(void)
         {"invalid_negative_row_number", invalid_negative_row_number},
         {"invalid_plus_row_number", invalid_plus_row_number},
         {"invalid_row_number_overflow", invalid_row_number_overflow},
+        {"invalid_row_number_overflow_suffix", invalid_row_number_overflow_suffix},
         {"invalid_duplicate_row", invalid_duplicate_row},
         {"invalid_too_few_fields", invalid_too_few_fields},
         {"invalid_too_many_fields", invalid_too_many_fields},
@@ -259,6 +296,9 @@ int main(void)
         {"invalid_bad_integer_cell", invalid_bad_integer_cell},
         {"invalid_plus_integer_cell", invalid_plus_integer_cell},
         {"invalid_integer_overflow", invalid_integer_overflow},
+        {"invalid_integer_max_plus_one", invalid_integer_max_plus_one},
+        {"invalid_integer_min_minus_one", invalid_integer_min_minus_one},
+        {"invalid_integer_overflow_suffix", invalid_integer_overflow_suffix},
         {"invalid_quote", invalid_quote},
         {"invalid_bare_cr", invalid_bare_cr},
         {"invalid_empty_line", invalid_empty_line},

@@ -1,8 +1,7 @@
 #include "csv_parser.h"
+#include "int_parse.h"
 
 #include <ctype.h>
-#include <errno.h>
-#include <inttypes.h>
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -161,81 +160,6 @@ static bool is_valid_column_name(const char *name)
     return true;
 }
 
-static bool parse_unsigned_int64_strict(const char *text, int64_t *value, bool *overflow)
-{
-    char *end = NULL;
-    intmax_t parsed = 0;
-    size_t index = 0U;
-
-    *overflow = false;
-
-    if (text[0] == '\0' || text[0] == '+' || text[0] == '-') {
-        return false;
-    }
-
-    while (text[index] != '\0') {
-        if (!isdigit((unsigned char)text[index])) {
-            return false;
-        }
-        index++;
-    }
-
-    errno = 0;
-    parsed = strtoimax(text, &end, 10);
-    if (errno == ERANGE || parsed > INT64_MAX) {
-        *overflow = true;
-        return false;
-    }
-
-    if (end == NULL || *end != '\0') {
-        return false;
-    }
-
-    *value = (int64_t)parsed;
-    return true;
-}
-
-static bool parse_signed_int64_strict(const char *text, int64_t *value, bool *overflow)
-{
-    char *end = NULL;
-    intmax_t parsed = 0;
-    size_t index = 0U;
-
-    *overflow = false;
-
-    if (text[0] == '\0' || text[0] == '+') {
-        return false;
-    }
-
-    if (text[0] == '-') {
-        if (text[1] == '\0') {
-            return false;
-        }
-        index = 1U;
-    }
-
-    while (text[index] != '\0') {
-        if (!isdigit((unsigned char)text[index])) {
-            return false;
-        }
-        index++;
-    }
-
-    errno = 0;
-    parsed = strtoimax(text, &end, 10);
-    if (errno == ERANGE || parsed < INT64_MIN || parsed > INT64_MAX) {
-        *overflow = true;
-        return false;
-    }
-
-    if (end == NULL || *end != '\0') {
-        return false;
-    }
-
-    *value = (int64_t)parsed;
-    return true;
-}
-
 static bool add_column(Parser *parser, size_t line, size_t field)
 {
     const char *name = parser->field.data;
@@ -292,17 +216,13 @@ static bool parse_header(Parser *parser, CsvDelimiter *header_delimiter)
 
 static bool parse_row_number(Parser *parser, size_t line, size_t field, int64_t *row_number)
 {
-    bool overflow = false;
+    IntParseResult result = int_parse_positive_row_number(parser->field.data, true, row_number, NULL);
 
-    if (!parse_unsigned_int64_strict(parser->field.data, row_number, &overflow)) {
-        if (overflow) {
+    if (result != INT_PARSE_OK) {
+        if (result == INT_PARSE_OVERFLOW) {
             return csv_error_set(parser->error, CSV_ERROR_INTEGER_OVERFLOW, line, field, "row number overflow at line %zu field %zu", line, field);
         }
         return csv_error_set(parser->error, CSV_ERROR_INVALID_ROW_NUMBER, line, field, "invalid row number at line %zu field %zu", line, field);
-    }
-
-    if (*row_number == 0) {
-        return csv_error_set(parser->error, CSV_ERROR_INVALID_ROW_NUMBER, line, field, "row number must be positive at line %zu", line);
     }
 
     return true;
@@ -311,7 +231,7 @@ static bool parse_row_number(Parser *parser, size_t line, size_t field, int64_t 
 static bool add_cell(Parser *parser, size_t line, size_t field)
 {
     int64_t value = 0;
-    bool overflow = false;
+    IntParseResult result = INT_PARSE_INVALID;
 
     if (parser->field.data[0] == '\0') {
         return csv_error_set(parser->error, CSV_ERROR_INVALID_CELL, line, field, "empty cell at line %zu field %zu", line, field);
@@ -331,8 +251,9 @@ static bool add_cell(Parser *parser, size_t line, size_t field)
         return true;
     }
 
-    if (!parse_signed_int64_strict(parser->field.data, &value, &overflow)) {
-        if (overflow) {
+    result = int_parse_signed_int64(parser->field.data, true, &value, NULL);
+    if (result != INT_PARSE_OK) {
+        if (result == INT_PARSE_OVERFLOW) {
             return csv_error_set(parser->error, CSV_ERROR_INTEGER_OVERFLOW, line, field, "integer overflow at line %zu field %zu", line, field);
         }
         return csv_error_set(parser->error, CSV_ERROR_INVALID_CELL, line, field, "invalid integer cell at line %zu field %zu", line, field);

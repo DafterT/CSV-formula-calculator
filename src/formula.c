@@ -1,4 +1,5 @@
 #include "formula.h"
+#include "int_parse.h"
 
 #include <ctype.h>
 #include <stdint.h>
@@ -44,18 +45,11 @@ static char *copy_range(const char *start, size_t length)
 
 static bool parse_number(FormulaParser *parser, FormulaArg *arg)
 {
-    const char *current = parser->cursor;
-    uint64_t value = 0U;
-    uint64_t limit = (uint64_t)INT64_MAX;
-    bool negative = false;
+    int64_t value = 0;
+    size_t consumed = 0U;
+    IntParseResult result = int_parse_signed_int64(parser->cursor, false, &value, &consumed);
 
-    if (*current == '-') {
-        negative = true;
-        limit = ((uint64_t)INT64_MAX) + 1U;
-        current++;
-    }
-
-    if (!is_digit_char(*current)) {
+    if (result == INT_PARSE_INVALID) {
         return csv_error_set(
             parser->error,
             CSV_ERROR_INVALID_FORMULA,
@@ -67,67 +61,30 @@ static bool parse_number(FormulaParser *parser, FormulaArg *arg)
         );
     }
 
-    while (is_digit_char(*current)) {
-        uint64_t digit = (uint64_t)(*current - '0');
-
-        if (value > ((limit - digit) / 10U)) {
-            return csv_error_set(
-                parser->error,
-                CSV_ERROR_INTEGER_OVERFLOW,
-                parser->source_line,
-                parser->source_field,
-                "integer overflow in formula at line %zu field %zu",
-                parser->source_line,
-                parser->source_field
-            );
-        }
-
-        value = value * 10U + digit;
-        current++;
+    if (result == INT_PARSE_OVERFLOW) {
+        return csv_error_set(
+            parser->error,
+            CSV_ERROR_INTEGER_OVERFLOW,
+            parser->source_line,
+            parser->source_field,
+            "integer overflow in formula at line %zu field %zu",
+            parser->source_line,
+            parser->source_field
+        );
     }
 
     arg->kind = FORMULA_ARG_NUMBER;
-    if (negative) {
-        if (value == (((uint64_t)INT64_MAX) + 1U)) {
-            arg->as.number = INT64_MIN;
-        } else {
-            arg->as.number = -(int64_t)value;
-        }
-    } else {
-        arg->as.number = (int64_t)value;
-    }
-
-    parser->cursor = current;
+    arg->as.number = value;
+    parser->cursor += consumed;
     return true;
 }
 
 static bool parse_row_number(FormulaParser *parser, int64_t *row_number)
 {
-    const char *current = parser->cursor;
-    uint64_t value = 0U;
-    bool has_digit = false;
+    size_t consumed = 0U;
+    IntParseResult result = int_parse_positive_row_number(parser->cursor, false, row_number, &consumed);
 
-    while (is_digit_char(*current)) {
-        uint64_t digit = (uint64_t)(*current - '0');
-
-        has_digit = true;
-        if (value > ((((uint64_t)INT64_MAX) - digit) / 10U)) {
-            return csv_error_set(
-                parser->error,
-                CSV_ERROR_INTEGER_OVERFLOW,
-                parser->source_line,
-                parser->source_field,
-                "integer overflow in formula at line %zu field %zu",
-                parser->source_line,
-                parser->source_field
-            );
-        }
-
-        value = value * 10U + digit;
-        current++;
-    }
-
-    if (!has_digit || value == 0U) {
+    if (result == INT_PARSE_INVALID) {
         return csv_error_set(
             parser->error,
             CSV_ERROR_INVALID_FORMULA,
@@ -139,8 +96,19 @@ static bool parse_row_number(FormulaParser *parser, int64_t *row_number)
         );
     }
 
-    *row_number = (int64_t)value;
-    parser->cursor = current;
+    if (result == INT_PARSE_OVERFLOW) {
+        return csv_error_set(
+            parser->error,
+            CSV_ERROR_INTEGER_OVERFLOW,
+            parser->source_line,
+            parser->source_field,
+            "integer overflow in formula at line %zu field %zu",
+            parser->source_line,
+            parser->source_field
+        );
+    }
+
+    parser->cursor += consumed;
     return true;
 }
 
