@@ -14,17 +14,11 @@
 
 ## Сборка
 
-Нужны Linux или WSL, CMake 3.16+ и `gcc` или `clang`.
+CMake 3.16+ и `gcc` или `clang`.
 
 ```bash
 cmake -S . -B build
 cmake --build build
-```
-
-На Windows через WSL:
-
-```powershell
-wsl.exe sh -lc "cmake -S . -B build && cmake --build build && ctest --test-dir build --output-on-failure"
 ```
 
 ## Запуск
